@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hieromem"
+version = "1.0.0"
+description = "A semantic memory layer for AI agents — store and recall memories scoped by namespace."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    "fastapi>=0.110",
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "numpy>=1.26",
+    "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+# Production store path: Postgres + pgvector via the async psycopg3 driver.
+postgres = [
+    "psycopg[binary,pool]>=3.1",
+    "pgvector>=0.2.5",
+]
+# Real semantic embeddings. Heavy; only installed when you actually need them.
+embeddings = [
+    "sentence-transformers>=2.5",
+]
+# Test + tooling deps.
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hieromem"]
+
+[tool.pytest.ini_options]
+# src layout: make `import hieromem` resolve without an install step.
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
