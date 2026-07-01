@@ -1,0 +1,9 @@
+# Memory core (this slice) needs only numpy.
+numpy>=1.24
+
+# Optional: real semantic embeddings. Swap HashingEmbedder ->
+# SentenceTransformerEmbedder once installed. Pulls in torch (large).
+# sentence-transformers>=2.2
+
+# Dev
+# pytest>=7.0
