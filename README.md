@@ -33,9 +33,11 @@ folded from that log. Nothing is authoritative except the log.
   SHA-256 hash chain, a **closed event taxonomy**, an append-only
   `InMemoryEventLog`, and `replay`/`rebuild` folds. Tamper-evident: mutate any
   past event and `verify()` raises.
-- **Memory-core seed** (`src/tenet/`: `models`, `embedder`, `store`,
-  `retriever`, `core`) — a scope-filter-first semantic memory. It predates the
-  log and gets refactored *onto* it in build step 2; for now it runs standalone.
+- **Memory core on the log** (`src/tenet/memory/`) — `MemoryCore.ingest`
+  appends a `memory.raw.appended` event (the source of truth) and folds it into
+  the raw store and the context store. The context store is a *pure projection*
+  (deterministic contextualizer, so no events of its own) and rebuilds
+  identically from the log; retrieval is namespace-filter-first.
 
 ## Run it
 
@@ -64,7 +66,7 @@ log.verify()                 # True — the hash chain holds
 ## Build order (see CLAUDE.md §12)
 
 1. **Event log** ✅
-2. Refactor memory core onto the log (raw = event, context = projection)
+2. **Memory core on the log** (raw = event, context = projection) ✅
 3. ScopeGrant + retriever scope enforcement
 4. Governance gate wired into the loop
 5. Approver + escalate path
