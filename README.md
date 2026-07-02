@@ -1,70 +1,82 @@
-# Tenet — Memory Core (v1, slice 1)
+# TENET
 
-The first slice of Tenet: a scope-aware semantic memory layer. This is the
-foundation the governance gate and the secure action agent get built on top of
-later. **Nothing here takes actions yet** — that's deliberate.
+A secure semantic memory layer for AI agents, with **governance as a
+first-class property** — demonstrated by one thin action agent built on top of
+it. v1 proves a principle, *governed memory*, not a hardened security product.
+
+The full design contract — threat model, architecture, decision register, and
+build order — lives in [CLAUDE.md](CLAUDE.md). Read it before changing anything.
+
+## The one idea
+
+An agent's memory is a security surface. Tenet is **event-sourced end to end**:
+a single append-only, hash-chained **event log is the only source of truth**,
+and memory, the audit trail, and the agent's step history are all *projections*
+folded from that log. Nothing is authoritative except the log.
+
+```
+   untrusted content ─► [ingest] ─►  ╔═══════════════╗  ◄─ gate verdicts
+   agent lifecycle   ──────────────► ║  EVENT LOG    ║  ◄─ approver decisions
+   tool observations ──────────────► ║ append-only,  ║
+                                     ║ hash-chained  ║
+                                     ╚══════╤════════╝
+                                fold/replay │
+              ┌───────────────┬─────────────┴──────────────┐
+              ▼               ▼                             ▼
+        Context Store     Audit View                 Step History
+        (retrieval)    (who/what/why)              (the agent loop)
+```
+
+## What's built
+
+- **Event log** (`src/tenet/events/`) — the spine. Envelope with ULID ids and a
+  SHA-256 hash chain, a **closed event taxonomy**, an append-only
+  `InMemoryEventLog`, and `replay`/`rebuild` folds. Tamper-evident: mutate any
+  past event and `verify()` raises.
+- **Memory-core seed** (`src/tenet/`: `models`, `embedder`, `store`,
+  `retriever`, `core`) — a scope-filter-first semantic memory. It predates the
+  log and gets refactored *onto* it in build step 2; for now it runs standalone.
 
 ## Run it
 
-The package lives under `src/` (src layout). Install it editable once, then the
-demo and tests run from anywhere:
-
 ```bash
-pip install -e ".[dev]"   # numpy + pytest
-python -m tenet.demo      # see ranking + scope isolation
-pytest                    # verify the invariants
+pip install -e ".[dev]"      # numpy + pytest
+pytest                       # event log + memory core (all green)
+python -m tenet.demo         # memory-core walkthrough: ranking + scope isolation
 ```
 
-Prefer not to install? Point Python at `src` directly:
+No install? `PYTHONPATH=src` works too (the tests already put `src/` on the path).
 
-```bash
-pip install numpy pytest
-PYTHONPATH=src python -m tenet.demo
-pytest                    # pyproject already puts src/ on the path for tests
+```python
+from tenet.events import InMemoryEventLog, Actor, taxonomy as T
+
+log = InMemoryEventLog()
+log.append(
+    namespace="proj",
+    actor=Actor(kind="user", id="alice"),
+    event_type=T.TASK_INITIATED,
+    payload={"description": "tidy the sandbox", "grant": {"tools": ["fs.read"]}},
+    correlation_id="task-1",
+)
+log.verify()                 # True — the hash chain holds
 ```
 
-## What's in here
+## Build order (see CLAUDE.md §12)
 
-```
-src/tenet/
-  models.py     MemoryRecord (canonical source of truth), RetrievalResult
-  embedder.py   Embedder interface + HashingEmbedder (default) + SentenceTransformer
-  store.py      MemoryStore interface + InMemoryStore
-  retriever.py  scope-filtered semantic search
-  core.py       MemoryCore — the single seam everything else depends on
-  demo.py       runnable walkthrough
-tests/
-  test_memory_core.py
-```
+1. **Event log** ✅
+2. Refactor memory core onto the log (raw = event, context = projection)
+3. ScopeGrant + retriever scope enforcement
+4. Governance gate wired into the loop
+5. Approver + escalate path
+6. Executor + sandboxed fs tools
+7. Headline demo — poisoned corpus, naive agent vs. Tenet agent, audit view as
+   the receipt
+8. Then pgvector · 9. Then FastAPI
 
-## Three design decisions worth understanding (so you can defend them)
+## What this defends against (and what it doesn't)
 
-1. **Canonical content vs. derived projection.** `MemoryRecord.content` is the
-   raw, never-mutated source of truth. The embedding is *derived* from it on
-   ingest and computed in exactly one place (`MemoryCore.ingest`). Everything
-   else treats the embedding as disposable.
-
-2. **Scope filter happens first, in the store — not after ranking.** `Retriever`
-   asks the store for records in the requested scope, *then* ranks. Out-of-scope
-   memories are never scored. This is a security boundary: a query in scope A
-   physically cannot surface scope B. `test_scope_isolation...` pins it.
-
-3. **Everything depends on `MemoryCore`, not on a model.** The embedder and store
-   are interfaces. Swapping `HashingEmbedder` for `SentenceTransformerEmbedder`,
-   or `InMemoryStore` for pgvector, changes one line of wiring and nothing else.
-
-## On the default embedder
-
-`HashingEmbedder` is deterministic and needs no model download, so the demo and
-tests run offline. It captures word overlap, not deep meaning. For real semantic
-similarity, install `sentence-transformers` (`pip install ".[embeddings]"`) and
-swap in `SentenceTransformerEmbedder` — same interface, one-line change.
-
-## Not here yet (next slices, in order)
-
-- **Tool layer** — sandboxed file ops (read/write/move/delete).
-- **Governance gate** — the crown jewel. Sits between agent intent and tool
-  execution. We slow down and build this carefully.
-- **Agent loop** — task -> retrieve -> propose -> gate -> execute/block -> log.
-- **Injection / scope demo** — poisoned memory vs. naive RAG.
-- Then pgvector, then FastAPI.
+In scope for v1: prompt injection via memory, scope escalation, and
+unattributable actions. **Out of scope:** host/process/db compromise, a
+malicious principal, model-level jailbreaks of the agent's "Brain" (the gate
+exists *because* the Brain can be fooled), and DoS. Data/instruction separation
+*reduces* injection risk; it does not eliminate it. See CLAUDE.md §1.
