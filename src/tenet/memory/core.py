@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from ..events import Actor, InMemoryEventLog, EventLog, new_ulid, rebuild
 from ..events.taxonomy import MEMORY_RAW_APPENDED
+from ..scope import ScopeGrant
 from .contextstore import ContextStore, InMemoryContextStore
 from .contextualizer import ChunkEmbedContextualizer, Contextualizer
 from .embedder import Embedder
@@ -120,9 +121,18 @@ class MemoryCore:
         rebuild(self._log, reducer, None)  # verifies the hash chain, then folds
 
     def retrieve(
-        self, query: str, namespace: str, limit: int = 5
+        self,
+        query: str,
+        grant: "ScopeGrant",
+        *,
+        namespace: str | None = None,
+        limit: int = 5,
     ) -> list[RetrievalResult]:
-        return self._retriever.retrieve(query, namespace, limit)
+        """Scope-bound retrieval. Authority comes only from ``grant``: retrieval
+        can never reach memory outside the grant's namespaces (§5). Pass
+        ``namespace`` to target one granted namespace, or leave it None to search
+        the union of all granted namespaces."""
+        return self._retriever.retrieve(query, grant, namespace, limit)
 
     # -- direct projection access (read-only helpers) ----------------------
     def raw(self, raw_id: str) -> RawRecord | None:
