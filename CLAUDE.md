@@ -20,10 +20,12 @@ order of §12; do not build ahead of it.
 - **Build step 1 — event log — is built** (`src/tenet/events/`): envelope +
   ULID ids, the closed taxonomy, the append-only hash-chained `InMemoryEventLog`,
   and `replay`/`rebuild`. Tests in `tests/test_event_log.py`.
-- **Memory-core seed exists but is pre-refactor** (`src/tenet/`: `models`,
-  `embedder`, `store`, `retriever`, `core`). It predates the event-log spine and
-  is refactored *onto* the log in build step 2 (§4, §12). Until then it runs
-  standalone (`python -m tenet.demo`, `tests/test_memory_core.py`).
+- **Build step 2 — memory core on the log — is built** (`src/tenet/memory/`):
+  `MemoryCore.ingest` appends a `memory.raw.appended` event (source of truth)
+  and folds it into the raw store and the context store. The context store is a
+  *pure projection* (D2, deterministic contextualizer → no events), rebuildable
+  from the log via `rebuild_projections`. Retriever is namespace-filter-first.
+  Runs via `python -m tenet.demo`; tests in `tests/test_memory_core.py`.
 - Everything else in this document (scope grants, gate, agent loop, executor,
   approver, projections, demo) is designed and not yet built.
 
@@ -385,7 +387,7 @@ and corrections-as-new-events (history never edited).
 ```
 tenet/
   events/          envelope.py, taxonomy.py, log.py (append-only + hash chain), replay.py   ◄── BUILT
-  memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py
+  memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)
   gate/            contract.py (Protocol, Verdict, GateDecision), policy.py  ◄── SAI WRITES
   agent/           brain.py (stub + LLM interface), loop.py, proposal.py
@@ -395,10 +397,10 @@ tenet/
   demo/            naive_agent.py, tenet_agent.py, poisoned_corpus/
 ```
 
-*Current tree:* the event log lives at `src/tenet/events/`. The pre-refactor
-memory-core seed still lives at the top of `src/tenet/` (`models.py`,
-`embedder.py`, `store.py`, `retriever.py`, `core.py`) and moves under
-`memory/` when step 2 refactors it onto the log.
+*Current tree:* the event log lives at `src/tenet/events/` and the memory
+subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
+top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
+it on the log. `ScopeGrant` (`scope/`) and everything below it are still to come.
 
 Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
 first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
@@ -411,7 +413,7 @@ touches the interfaces above.
 
 1. **Event log** — envelope, taxonomy, append + hash chain, replay. **✅ built.**
 2. Refactor memory core onto the log: raw-append as event, context as
-   projection.
+   projection. **✅ built.**
 3. ScopeGrant + retriever scope enforcement.
 4. Gate contract wired into the loop; **Sai writes policy.py** (describe-first
    discipline applies here and only here).

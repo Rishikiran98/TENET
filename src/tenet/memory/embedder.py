@@ -1,19 +1,18 @@
-"""Embedders turn text into vectors. The embedding is a *derived projection*
-of canonical content — swappable, never authoritative.
+"""Embedders turn text into vectors. The embedding is a *derived projection* of
+canonical content — swappable, never authoritative.
 
 `Embedder` is the interface. Two implementations ship:
 
 - `HashingEmbedder` (default): deterministic, no model download, no heavy deps.
-  Good enough to demonstrate retrieval ranking and scope filtering offline.
+  Good enough to demonstrate retrieval ranking and namespace filtering offline.
   It captures lexical overlap, NOT deep semantic similarity.
 
 - `SentenceTransformerEmbedder`: real semantic embeddings. One-line swap for
   production. Requires `pip install sentence-transformers` and a model download
   on first use.
 
-The point of the interface: nothing else in Tenet knows or cares which one is
-wired in. Retriever, MemoryCore, and the agent all depend on `Embedder`, never
-on a concrete model.
+Nothing else in Tenet knows or cares which one is wired in. The contextualizer,
+retriever, and core all depend on `Embedder`, never on a concrete model.
 """
 
 from __future__ import annotations
@@ -38,8 +37,8 @@ class HashingEmbedder:
     """Hash tokens into a fixed-dimensional bag-of-words vector, L2-normalised.
 
     Deterministic and dependency-light. Two texts that share words land near
-    each other; unrelated texts do not. This is enough to show the architecture
-    working end to end without downloading anything.
+    each other; unrelated texts do not. Enough to show the architecture working
+    end to end without downloading anything.
     """
 
     def __init__(self, dim: int = 256) -> None:
