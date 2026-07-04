@@ -38,6 +38,10 @@ folded from that log. Nothing is authoritative except the log.
   the raw store and the context store. The context store is a *pure projection*
   (deterministic contextualizer, so no events of its own) and rebuilds
   identically from the log; retrieval is namespace-filter-first.
+- **Scope grants** (`src/tenet/scope/`) — a `ScopeGrant` is the sole source of
+  an agent's authority for one task (namespaces, tools, action budget, expiry).
+  The retriever enforces its `namespaces`: retrieval can never reach memory
+  outside the grant, and no retrieved content can widen it.
 
 ## Run it
 
@@ -67,7 +71,7 @@ log.verify()                 # True — the hash chain holds
 
 1. **Event log** ✅
 2. **Memory core on the log** (raw = event, context = projection) ✅
-3. ScopeGrant + retriever scope enforcement
+3. **ScopeGrant + retriever scope enforcement** ✅
 4. Governance gate wired into the loop
 5. Approver + escalate path
 6. Executor + sandboxed fs tools

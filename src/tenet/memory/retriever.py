@@ -1,28 +1,29 @@
-"""Retrieval: given a query and a namespace, return the most similar context.
+"""Retrieval: given a query and a grant, return the most similar context the
+grant permits the caller to read.
 
-The ordering of operations is deliberate and is a security boundary, not a
-performance choice (§4.4):
+The ordering is deliberate and is a security boundary, not a performance choice
+(§4.4). It is now the full two-stage filter the contract calls for:
 
-    1. NAMESPACE FILTER FIRST. Ask the context store only for records in the
-       requested namespace. Out-of-namespace memory is never even scored — a
-       query in namespace A physically cannot surface memory from namespace B.
-    2. THEN score by similarity within that filtered set.
-    3. THEN take the top-k.
+    1. GRANT AUTHORIZATION. The grant decides which namespaces this retrieval may
+       touch at all. A requested namespace outside the grant is denied here —
+       nothing from it ever enters the candidate set. Authority flows only from
+       the grant (§5, invariant 1); no memory content can widen it.
+    2. NAMESPACE FILTER at the storage boundary — ask the store only for records
+       in the permitted namespace(s).
+    3. SIMILARITY RANKING within that filtered set, then top-k.
 
-Doing the filter after ranking (rank everything, then drop the wrong namespace)
-would leak the existence and ordering of memory the caller may not read. We
-don't do that.
+Doing any filter after ranking would leak the existence and ordering of memory
+the caller may not read. We don't do that.
 
-The full §4.4 contract is a two-stage filter — the grant's allowed namespaces,
-then the query's requested namespace. Grant enforcement is build step 3; this
-retriever implements the requested-namespace stage and is shaped so the grant
-stage slots in ahead of it without changing the ranking path.
+Per §5 invariant 3 the retriever enforces ``namespaces`` and nothing else; the
+grant's tools, constraints, action budget, and expiry are the gate's to enforce.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+from ..scope import ScopeGrant
 from .contextstore import ContextStore
 from .embedder import Embedder
 from .models import RetrievalResult
@@ -42,21 +43,37 @@ class Retriever:
         self._embedder = embedder
 
     def retrieve(
-        self, query: str, namespace: str, limit: int = 5
+        self,
+        query: str,
+        grant: ScopeGrant,
+        namespace: str | None = None,
+        limit: int = 5,
     ) -> list[RetrievalResult]:
-        # 1. namespace filter first (the candidate set is already bounded)
-        candidates = self._store.list(namespace=namespace)
+        # 1. grant authorization: which namespaces may this retrieval read?
+        #    - namespace given  -> only if the grant permits it, else denied
+        #    - namespace None   -> the union of the grant's namespaces
+        if namespace is None:
+            allowed = grant.namespaces
+        elif grant.can_read(namespace):
+            allowed = frozenset({namespace})
+        else:
+            return []  # out-of-grant namespace: denied, never scored
+        if not allowed:
+            return []
+
+        # 2. namespace filter at the storage boundary
+        candidates = [
+            record for ns in allowed for record in self._store.list(namespace=ns)
+        ]
         if not candidates:
             return []
 
-        # 2. score within the namespace
+        # 3. rank within the permitted set
         query_vec = self._embedder.embed(query)
         scored = [
             RetrievalResult(record=r, score=_cosine(query_vec, r.embedding))
             for r in candidates
             if r.embedding
         ]
-
-        # 3. top-k
         scored.sort(key=lambda res: res.score, reverse=True)
         return scored[:limit]

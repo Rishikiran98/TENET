@@ -26,8 +26,14 @@ order of §12; do not build ahead of it.
   *pure projection* (D2, deterministic contextualizer → no events), rebuildable
   from the log via `rebuild_projections`. Retriever is namespace-filter-first.
   Runs via `python -m tenet.demo`; tests in `tests/test_memory_core.py`.
-- Everything else in this document (scope grants, gate, agent loop, executor,
-  approver, projections, demo) is designed and not yet built.
+- **Build step 3 — ScopeGrant + retriever scope enforcement — is built**
+  (`src/tenet/scope/`): the `ScopeGrant`/`ToolGrant` capability model, and the
+  retriever's stage-1 grant authorization — retrieval can only ever reach the
+  grant's `namespaces`, and no memory content can widen it. Tests in
+  `tests/test_scope.py`. Per §5 the retriever enforces `namespaces` only; the
+  grant's tools/constraints/`max_actions`/`expires_at` are the gate's to enforce.
+- Everything else in this document (gate, agent loop, executor, approver,
+  projections, demo) is designed and not yet built.
 
 ---
 
@@ -388,7 +394,7 @@ and corrections-as-new-events (history never edited).
 tenet/
   events/          envelope.py, taxonomy.py, log.py (append-only + hash chain), replay.py   ◄── BUILT
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
-  scope/           grant.py (ScopeGrant, ToolGrant)
+  scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision), policy.py  ◄── SAI WRITES
   agent/           brain.py (stub + LLM interface), loop.py, proposal.py
   approver/        protocol.py, cli.py, scripted.py, failsafe.py
@@ -400,7 +406,7 @@ tenet/
 *Current tree:* the event log lives at `src/tenet/events/` and the memory
 subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
 top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
-it on the log. `ScopeGrant` (`scope/`) and everything below it are still to come.
+it on the log. `ScopeGrant` lives at `src/tenet/scope/`; the gate (`gate/`) and everything below it are still to come.
 
 Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
 first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
@@ -414,7 +420,7 @@ touches the interfaces above.
 1. **Event log** — envelope, taxonomy, append + hash chain, replay. **✅ built.**
 2. Refactor memory core onto the log: raw-append as event, context as
    projection. **✅ built.**
-3. ScopeGrant + retriever scope enforcement.
+3. ScopeGrant + retriever scope enforcement. **✅ built.**
 4. Gate contract wired into the loop; **Sai writes policy.py** (describe-first
    discipline applies here and only here).
 5. Approver + escalate path end to end.
