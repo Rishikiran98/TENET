@@ -32,7 +32,14 @@ order of §12; do not build ahead of it.
   grant's `namespaces`, and no memory content can widen it. Tests in
   `tests/test_scope.py`. Per §5 the retriever enforces `namespaces` only; the
   grant's tools/constraints/`max_actions`/`expires_at` are the gate's to enforce.
-- Everything else in this document (gate, agent loop, executor, approver,
+- **Build step 4 — gate contract — is built** (`src/tenet/gate/contract.py`):
+  the pure-function `DefaultGate` (grant check → policy → unmatched⇒DENY, D7),
+  `Verdict`/`GateDecision`, the `Policy` protocol, and the `Proposal` type
+  (`src/tenet/agent/proposal.py`). Tests in `tests/test_gate.py`. Per D8 the
+  policy *content* (`gate/policy.py`) is Sai's to author (describe-first) and is
+  intentionally absent; emitting `gate.verdict.issued` is the loop's job (the
+  gate stays pure), so full loop wiring lands with the agent loop.
+- Everything else in this document (agent loop, executor, approver,
   projections, demo) is designed and not yet built.
 
 ---
@@ -395,8 +402,8 @@ tenet/
   events/          envelope.py, taxonomy.py, log.py (append-only + hash chain), replay.py   ◄── BUILT
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
-  gate/            contract.py (Protocol, Verdict, GateDecision), policy.py  ◄── SAI WRITES
-  agent/           brain.py (stub + LLM interface), loop.py, proposal.py
+  gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
+  agent/           proposal.py  ◄── BUILT | brain.py (stub + LLM interface), loop.py
   approver/        protocol.py, cli.py, scripted.py, failsafe.py
   executor/        registry.py, fs_tools.py (sandboxed)
   projections/     audit.py, steps.py
@@ -406,7 +413,7 @@ tenet/
 *Current tree:* the event log lives at `src/tenet/events/` and the memory
 subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
 top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
-it on the log. `ScopeGrant` lives at `src/tenet/scope/`; the gate (`gate/`) and everything below it are still to come.
+it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the Brain, the loop, and everything below are still to come.
 
 Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
 first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
@@ -422,7 +429,9 @@ touches the interfaces above.
    projection. **✅ built.**
 3. ScopeGrant + retriever scope enforcement. **✅ built.**
 4. Gate contract wired into the loop; **Sai writes policy.py** (describe-first
-   discipline applies here and only here).
+   discipline applies here and only here). **Contract ✅ built** (`DefaultGate`,
+   `Verdict`/`GateDecision`, `Policy` protocol, `Proposal`); `policy.py` pending
+   Sai; live loop wiring with step 5.
 5. Approver + escalate path end to end.
 6. Executor + sandboxed fs tools; `max_actions` circuit breaker.
 7. **Headline demo:** poisoned corpus, naive agent vs. Tenet agent,
