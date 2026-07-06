@@ -42,6 +42,10 @@ folded from that log. Nothing is authoritative except the log.
   an agent's authority for one task (namespaces, tools, action budget, expiry).
   The retriever enforces its `namespaces`: retrieval can never reach memory
   outside the grant, and no retrieved content can widen it.
+- **Governance gate — contract** (`src/tenet/gate/`) — the pure-function
+  `DefaultGate`: grant check (tool membership, expiry, action budget) → policy →
+  unmatched⇒DENY. Ships the `Gate`/`Policy` protocols and `Verdict`/
+  `GateDecision`; the policy *rules* are authored separately (describe-first).
 
 ## Run it
 
@@ -72,7 +76,7 @@ log.verify()                 # True — the hash chain holds
 1. **Event log** ✅
 2. **Memory core on the log** (raw = event, context = projection) ✅
 3. **ScopeGrant + retriever scope enforcement** ✅
-4. Governance gate wired into the loop
+4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring next)
 5. Approver + escalate path
 6. Executor + sandboxed fs tools
 7. Headline demo — poisoned corpus, naive agent vs. Tenet agent, audit view as
