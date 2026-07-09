@@ -46,6 +46,11 @@ folded from that log. Nothing is authoritative except the log.
   `DefaultGate`: grant check (tool membership, expiry, action budget) → policy →
   unmatched⇒DENY. Ships the `Gate`/`Policy` protocols and `Verdict`/
   `GateDecision`; the policy *rules* are authored separately (describe-first).
+- **Agent loop + approver** (`src/tenet/agent/`, `src/tenet/approver/`) — the
+  deterministic `ScriptedBrain` (LLM-swappable), and `AgentLoop`: task →
+  retrieve (as data) → propose → gate → approve/execute/block, every hop an
+  event with an intact why-chain. Escalations fail closed; the approval surface
+  never carries memory content.
 
 ## Run it
 
@@ -77,7 +82,7 @@ log.verify()                 # True — the hash chain holds
 2. **Memory core on the log** (raw = event, context = projection) ✅
 3. **ScopeGrant + retriever scope enforcement** ✅
 4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring next)
-5. Approver + escalate path
+5. **Agent loop + approver/escalate path** ✅
 6. Executor + sandboxed fs tools
 7. Headline demo — poisoned corpus, naive agent vs. Tenet agent, audit view as
    the receipt

@@ -100,3 +100,19 @@ class ScopeGrant:
         action; retrieval (read-only) is bounded by namespaces, not expiry."""
         moment = now or _now()
         return moment >= datetime.fromisoformat(self.expires_at)
+
+    def to_payload(self) -> dict:
+        """JSON-serializable form, carried inline in the ``task.initiated`` event
+        (§5: the grant travels with the task, full and auditable). Sorted so the
+        canonical event hash is deterministic."""
+        return {
+            "grant_id": self.grant_id,
+            "principal": self.principal,
+            "task_id": self.task_id,
+            "namespaces": sorted(self.namespaces),
+            "tools": [
+                {"tool": tg.tool, "constraints": tg.constraints} for tg in self.tools
+            ],
+            "max_actions": self.max_actions,
+            "expires_at": self.expires_at,
+        }
