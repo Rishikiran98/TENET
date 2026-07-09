@@ -1,8 +1,20 @@
-"""Tenet's agent layer. Only the Proposal DTO exists so far; the Brain and the
-loop are later slices (§7)."""
+"""Tenet's agent layer (build steps 4-5): intent, the deterministic Brain, and
+the loop that ties memory → Brain → gate → approver → executor together with
+every hop evented."""
 
 from __future__ import annotations
 
+from .brain import Brain, ScriptedBrain
+from .loop import AgentLoop, Executor, StepOutcome, TaskResult, ToolExecutionError
 from .proposal import Proposal
 
-__all__ = ["Proposal"]
+__all__ = [
+    "Proposal",
+    "Brain",
+    "ScriptedBrain",
+    "AgentLoop",
+    "Executor",
+    "TaskResult",
+    "StepOutcome",
+    "ToolExecutionError",
+]

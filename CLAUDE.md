@@ -38,9 +38,19 @@ order of §12; do not build ahead of it.
   (`src/tenet/agent/proposal.py`). Tests in `tests/test_gate.py`. Per D8 the
   policy *content* (`gate/policy.py`) is Sai's to author (describe-first) and is
   intentionally absent; emitting `gate.verdict.issued` is the loop's job (the
-  gate stays pure), so full loop wiring lands with the agent loop.
-- Everything else in this document (agent loop, executor, approver,
-  projections, demo) is designed and not yet built.
+  gate stays pure) and now lands there.
+- **Build step 5 — agent loop + approver/escalate path — is built**
+  (`src/tenet/agent/brain.py`, `loop.py`; `src/tenet/approver/`): the `Brain`
+  protocol with the deterministic `ScriptedBrain` (D4), the `Approver` protocol
+  with scripted / fail-safe-deny / CLI implementations, and `AgentLoop`, which
+  wires task → retrieve → propose → gate → approve/execute/block → complete with
+  every hop evented and causation-chained. The approval surface is built from
+  the proposal + gate decision only — never memory content (§7, pinned by test).
+  The loop feeds `actions_used` to the gate, which enforces `max_actions`.
+  The `Executor` is a protocol here; the sandboxed fs executor is step 6.
+  Tests in `tests/test_agent_loop.py`.
+- Everything else in this document (executor tools, projections, demo) is
+  designed and not yet built.
 
 ---
 
@@ -403,8 +413,8 @@ tenet/
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
-  agent/           proposal.py  ◄── BUILT | brain.py (stub + LLM interface), loop.py
-  approver/        protocol.py, cli.py, scripted.py, failsafe.py
+  agent/           proposal.py, brain.py (stub + LLM interface), loop.py   ◄── BUILT
+  approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
   executor/        registry.py, fs_tools.py (sandboxed)
   projections/     audit.py, steps.py
   demo/            naive_agent.py, tenet_agent.py, poisoned_corpus/
@@ -413,7 +423,7 @@ tenet/
 *Current tree:* the event log lives at `src/tenet/events/` and the memory
 subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
 top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
-it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the Brain, the loop, and everything below are still to come.
+it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the executor's tools, the projections, and the demo are still to come.
 
 Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
 first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
@@ -431,8 +441,9 @@ touches the interfaces above.
 4. Gate contract wired into the loop; **Sai writes policy.py** (describe-first
    discipline applies here and only here). **Contract ✅ built** (`DefaultGate`,
    `Verdict`/`GateDecision`, `Policy` protocol, `Proposal`); `policy.py` pending
-   Sai; live loop wiring with step 5.
-5. Approver + escalate path end to end.
+   Sai; loop wiring ✅ landed with step 5.
+5. Approver + escalate path end to end. **✅ built** (with the agent loop and
+   Brain stub; the loop emits every §7 event with an intact why-chain).
 6. Executor + sandboxed fs tools; `max_actions` circuit breaker.
 7. **Headline demo:** poisoned corpus, naive agent vs. Tenet agent,
    side-by-side, audit view as the receipt.
