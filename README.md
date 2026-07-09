@@ -51,6 +51,11 @@ folded from that log. Nothing is authoritative except the log.
   retrieve (as data) → propose → gate → approve/execute/block, every hop an
   event with an intact why-chain. Escalations fail closed; the approval surface
   never carries memory content.
+- **Executor + sandboxed fs tools** (`src/tenet/executor/`) — a closed tool
+  registry over `fs.read`/`fs.write`/`fs.delete`, jailed to a sandbox root
+  (`..`, absolute-path and symlink escapes all rejected on the resolved path).
+  Grant constraints (`path_prefix`) are re-checked at the executor — defense in
+  depth; it does not trust that the gate was the only path to it.
 
 ## Run it
 
@@ -83,7 +88,7 @@ log.verify()                 # True — the hash chain holds
 3. **ScopeGrant + retriever scope enforcement** ✅
 4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring next)
 5. **Agent loop + approver/escalate path** ✅
-6. Executor + sandboxed fs tools
+6. **Executor + sandboxed fs tools** ✅
 7. Headline demo — poisoned corpus, naive agent vs. Tenet agent, audit view as
    the receipt
 8. Then pgvector · 9. Then FastAPI

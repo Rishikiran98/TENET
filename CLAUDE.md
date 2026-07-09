@@ -49,8 +49,18 @@ order of §12; do not build ahead of it.
   The loop feeds `actions_used` to the gate, which enforces `max_actions`.
   The `Executor` is a protocol here; the sandboxed fs executor is step 6.
   Tests in `tests/test_agent_loop.py`.
-- Everything else in this document (executor tools, projections, demo) is
-  designed and not yet built.
+- **Build step 6 — executor + sandboxed fs tools — is built**
+  (`src/tenet/executor/`): the closed `ToolRegistry` + `RegistryExecutor`
+  (unknown tool ⇒ execution failure), and `fs.read`/`fs.write`/`fs.delete`
+  jailed to a sandbox root. The path jail rejects `..`, out-of-root resolution,
+  and symlink escapes on the *resolved* path; the ToolGrant's `path_prefix` is
+  re-checked component-wise at the executor even when called directly —
+  defense in depth per §8. Violations surface as `action.failed`, distinct from
+  policy blocks. Tests in `tests/test_executor.py` (including the loop driving
+  the real executor). The `max_actions` circuit breaker was already live via
+  gate + loop (step 5).
+- Everything else in this document (projections, demo) is designed and not
+  yet built.
 
 ---
 
@@ -415,7 +425,7 @@ tenet/
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
   agent/           proposal.py, brain.py (stub + LLM interface), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
-  executor/        registry.py, fs_tools.py (sandboxed)
+  executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
   projections/     audit.py, steps.py
   demo/            naive_agent.py, tenet_agent.py, poisoned_corpus/
 ```
@@ -423,7 +433,7 @@ tenet/
 *Current tree:* the event log lives at `src/tenet/events/` and the memory
 subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
 top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
-it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the executor's tools, the projections, and the demo are still to come.
+it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the projections, and the demo are still to come.
 
 Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
 first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
@@ -444,7 +454,7 @@ touches the interfaces above.
    Sai; loop wiring ✅ landed with step 5.
 5. Approver + escalate path end to end. **✅ built** (with the agent loop and
    Brain stub; the loop emits every §7 event with an intact why-chain).
-6. Executor + sandboxed fs tools; `max_actions` circuit breaker.
+6. Executor + sandboxed fs tools; `max_actions` circuit breaker. **✅ built.**
 7. **Headline demo:** poisoned corpus, naive agent vs. Tenet agent,
    side-by-side, audit view as the receipt.
 8. Then pgvector. 9. Then FastAPI.
