@@ -3,8 +3,8 @@
 Two design points worth defending:
 
 - **ULID event ids.** Lexically sortable (timestamp in the high-order bits) and
-  globally unique, so append order and sort order agree without a separate
-  sequence column.
+  probabilistically unique. Within one millisecond, random bits do not preserve
+  insertion order. Replay uses log append order, never lexical ID order.
 - **Hash chain.** ``hash`` is SHA-256 over a canonical serialization of every
   other envelope field, including ``prev_hash``. Any mutation of a past event
   changes its hash, which breaks every link after it — the log is tamper-evident
@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
+from ..values import freeze, thaw
 
 # Crockford base32 (no I, L, O, U) — the ULID alphabet.
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
@@ -60,6 +61,12 @@ class Actor:
     kind: ActorKind
     id: str
 
+    def __post_init__(self):
+        if self.kind not in {'user', 'agent', 'gate', 'approver', 'system', 'tool'}:
+            raise ValueError('invalid actor kind')
+        if not isinstance(self.id, str) or not self.id:
+            raise ValueError('actor id must be non-empty')
+
 
 @dataclass(frozen=True)
 class Event:
@@ -79,6 +86,9 @@ class Event:
     causation_id: str | None  # event_id that directly caused this one
     prev_hash: str           # hash of the previous event (chain)
     hash: str                # SHA-256 over the canonical form of all the above
+
+    def __post_init__(self):
+        object.__setattr__(self, 'payload', freeze(self.payload))
 
 
 def _material(
@@ -103,14 +113,14 @@ def _material(
         "namespace": namespace,
         "actor": {"kind": actor.kind, "id": actor.id},
         "event_type": event_type,
-        "payload": payload,
+        "payload": thaw(payload),
         "schema_version": schema_version,
         "correlation_id": correlation_id,
         "causation_id": causation_id,
         "prev_hash": prev_hash,
     }
     return json.dumps(
-        doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode("utf-8")
 
 

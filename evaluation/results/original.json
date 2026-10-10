@@ -1,0 +1,52 @@
+{
+  "system": "original",
+  "cases": [
+    {
+      "case": "allowed_write",
+      "passed": true,
+      "unexpected_error": null
+    },
+    {
+      "case": "outside_grant",
+      "passed": true,
+      "unexpected_error": null
+    },
+    {
+      "case": "budget",
+      "passed": true,
+      "unexpected_error": null
+    },
+    {
+      "case": "stale_approval",
+      "passed": false,
+      "unexpected_error": null
+    },
+    {
+      "case": "approval_expiry",
+      "passed": false,
+      "unexpected_error": null
+    },
+    {
+      "case": "prefix_symlink",
+      "passed": false,
+      "unexpected_error": null
+    },
+    {
+      "case": "tool_grant_mismatch",
+      "passed": false,
+      "unexpected_error": null
+    },
+    {
+      "case": "task_reuse",
+      "passed": false,
+      "unexpected_error": null
+    },
+    {
+      "case": "unknown_citation",
+      "passed": false,
+      "unexpected_error": null
+    }
+  ],
+  "passed": 3,
+  "total": 9
+}

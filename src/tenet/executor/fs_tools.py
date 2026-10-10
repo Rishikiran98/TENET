@@ -54,12 +54,18 @@ class SandboxedFs:
         return self._root
 
     def resolve(self, path_str: str, constraints: dict) -> Path:
+        if set(constraints) - {"path_prefix"}:
+            raise SandboxViolation("unsupported filesystem constraint")
+        if "\x00" in path_str:
+            raise SandboxViolation("null byte in path")
         parts = _logical_parts(path_str)
 
         # constraint re-check (defense in depth): component-wise prefix match,
         # so a prefix of /notes does not authorize /notes2.
         prefix = constraints.get("path_prefix")
-        if prefix is not None:
+        if "path_prefix" in constraints:
+            if not isinstance(prefix, str) or not prefix or ".." in PurePosixPath(prefix).parts:
+                raise SandboxViolation("invalid path_prefix")
             prefix_parts = tuple(
                 p for p in PurePosixPath(prefix).parts if p not in ("/", ".")
             )
@@ -69,7 +75,12 @@ class SandboxedFs:
                 )
 
         # the jail: resolve (follows symlinks) and require the result inside root
-        candidate = self._root.joinpath(*parts).resolve()
+        candidate = self._root
+        for part in parts:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                raise SandboxViolation("symlink path components are not permitted")
+        candidate = candidate.resolve()
         if not candidate.is_relative_to(self._root):
             raise SandboxViolation(f"path {path_str!r} escapes the sandbox (jail)")
         return candidate
@@ -92,7 +103,10 @@ class FsRead:
         target = self._fs.resolve(_require_path(args), constraints)
         if not target.is_file():
             raise ToolExecutionError(f"no such file: {args['path']!r}")
-        return {"path": args["path"], "content": target.read_text("utf-8")}
+        try:
+            return {"path": args["path"], "content": target.read_text("utf-8")}
+        except (OSError, UnicodeError) as exc:
+            raise ToolExecutionError(str(exc)) from exc
 
 
 class FsWrite:
@@ -106,8 +120,17 @@ class FsWrite:
         if not isinstance(content, str):
             raise ToolExecutionError("fs.write args must include string 'content'")
         target = self._fs.resolve(_require_path(args), constraints)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, "utf-8")
+        if target.is_dir():
+            raise ToolExecutionError("write target is a directory")
+        try:
+            encoded = content.encode("utf-8")
+        except UnicodeError as exc:
+            raise ToolExecutionError(str(exc)) from exc
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(encoded)
+        except OSError as exc:
+            raise ToolExecutionError(str(exc), outcome_unknown=True) from exc
         return {"path": args["path"], "bytes_written": len(content.encode("utf-8"))}
 
 
@@ -121,5 +144,8 @@ class FsDelete:
         target = self._fs.resolve(_require_path(args), constraints)
         if not target.is_file():
             raise ToolExecutionError(f"no such file: {args['path']!r}")
-        target.unlink()
+        try:
+            target.unlink()
+        except OSError as exc:
+            raise ToolExecutionError(str(exc), outcome_unknown=True) from exc
         return {"path": args["path"], "deleted": True}

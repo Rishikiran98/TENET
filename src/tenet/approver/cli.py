@@ -14,4 +14,4 @@ class CLIApprover:  # pragma: no cover — interactive
         print(surface.render())
         answer = input("approve? [y/N] ").strip().lower()
         approved = answer in {"y", "yes"}
-        return ApprovalDecision(approved, self.id, f"cli answer: {answer or 'n'}")
+        return ApprovalDecision(approved, self.id, f"cli answer: {answer or 'n'}", binding=surface.binding)

@@ -38,5 +38,7 @@ def replay(events: Iterable[Event], reducer: Reducer, initial: S) -> S:
 def rebuild(log: EventLog, reducer: Reducer, initial: S) -> S:
     """Verify the chain, then replay. A projection built on an unverified log is
     a projection you cannot trust, so verification is not optional here."""
-    log.verify()
-    return replay(iter(log), reducer, initial)
+    with log.transaction():
+        log.verify()
+        snapshot = tuple(log)
+    return replay(snapshot, reducer, initial)

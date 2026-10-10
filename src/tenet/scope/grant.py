@@ -25,8 +25,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from collections.abc import Mapping
 
 from ..events import new_ulid
+from ..values import freeze, thaw
 
 
 def _now() -> datetime:
@@ -42,6 +44,13 @@ class ToolGrant:
     tool: str                       # e.g. "fs.read"
     constraints: dict = field(default_factory=dict)  # e.g. {"path_prefix": "/sandbox"}
 
+    def __post_init__(self):
+        if not isinstance(self.tool, str) or not self.tool:
+            raise ValueError('tool name must be non-empty')
+        if not isinstance(self.constraints, Mapping):
+            raise ValueError('constraints must be a mapping')
+        object.__setattr__(self, 'constraints', freeze(self.constraints))
+
 
 @dataclass(frozen=True)
 class ScopeGrant:
@@ -54,6 +63,29 @@ class ScopeGrant:
     tools: tuple[ToolGrant, ...]    # closed tool allowlist
     max_actions: int                # circuit breaker (enforced by the gate)
     expires_at: str                 # ISO-8601 UTC wall-clock bound (gate-enforced)
+
+    def __post_init__(self):
+        for value in (self.grant_id, self.principal, self.task_id):
+            if not isinstance(value, str) or not value:
+                raise ValueError('grant identifiers must be non-empty strings')
+        if type(self.max_actions) is not int or self.max_actions < 0:
+            raise ValueError('max_actions must be a nonnegative integer')
+        if isinstance(self.namespaces, str):
+            raise ValueError('namespaces must be a collection')
+        object.__setattr__(self, 'namespaces', frozenset(self.namespaces))
+        object.__setattr__(self, 'tools', tuple(self.tools))
+        if any(not isinstance(n, str) or not n for n in self.namespaces):
+            raise ValueError('invalid namespace')
+        if any(not isinstance(t, ToolGrant) for t in self.tools):
+            raise ValueError('invalid tool grant')
+        if len({t.tool for t in self.tools}) != len(self.tools):
+            raise ValueError('duplicate tool grant')
+        try:
+            expiry = datetime.fromisoformat(self.expires_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('invalid expiry') from exc
+        if expiry.tzinfo is None:
+            raise ValueError('expiry must include timezone')
 
     @classmethod
     def issue(
@@ -72,7 +104,7 @@ class ScopeGrant:
             grant_id=new_ulid(),
             principal=principal,
             task_id=task_id,
-            namespaces=frozenset(namespaces),
+            namespaces=namespaces,
             tools=tuple(tools),
             max_actions=max_actions,
             expires_at=(_now() + timedelta(seconds=ttl_seconds)).isoformat(),
@@ -97,8 +129,10 @@ class ScopeGrant:
 
     def is_expired(self, now: datetime | None = None) -> bool:
         """Whether the wall-clock bound has passed. Checked by the gate before any
-        action; retrieval (read-only) is bounded by namespaces, not expiry."""
-        moment = now or _now()
+        action and by the retriever before reads. Equality is expired."""
+        moment = now if now is not None else _now()
+        if moment.tzinfo is None:
+            raise ValueError('clock must include timezone')
         return moment >= datetime.fromisoformat(self.expires_at)
 
     def to_payload(self) -> dict:
@@ -111,7 +145,7 @@ class ScopeGrant:
             "task_id": self.task_id,
             "namespaces": sorted(self.namespaces),
             "tools": [
-                {"tool": tg.tool, "constraints": tg.constraints} for tg in self.tools
+                {"tool": tg.tool, "constraints": thaw(tg.constraints)} for tg in self.tools
             ],
             "max_actions": self.max_actions,
             "expires_at": self.expires_at,

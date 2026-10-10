@@ -1,0 +1,38 @@
+[
+  {
+    "system": "repaired",
+    "phase": "before_effect",
+    "effect_exists": false,
+    "indeterminate_count": 1,
+    "task_reuse_rejected": true,
+    "recovery_preserved_effect_state": true,
+    "passed": true
+  },
+  {
+    "system": "repaired",
+    "phase": "after_effect",
+    "effect_exists": true,
+    "indeterminate_count": 1,
+    "task_reuse_rejected": true,
+    "recovery_preserved_effect_state": true,
+    "passed": true
+  },
+  {
+    "system": "conventional",
+    "phase": "before_effect",
+    "effect_exists": false,
+    "indeterminate_count": 1,
+    "task_reuse_rejected": true,
+    "recovery_preserved_effect_state": true,
+    "passed": true
+  },
+  {
+    "system": "conventional",
+    "phase": "after_effect",
+    "effect_exists": true,
+    "indeterminate_count": 1,
+    "task_reuse_rejected": true,
+    "recovery_preserved_effect_state": true,
+    "passed": true
+  }
+]

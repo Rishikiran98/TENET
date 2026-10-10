@@ -23,6 +23,7 @@ from typing import Protocol, runtime_checkable
 
 from .embedder import Embedder
 from .models import ContextRecord, RawRecord
+from ..values import digest
 
 
 @runtime_checkable
@@ -45,7 +46,10 @@ class ChunkEmbedContextualizer:
 
     def __init__(self, embedder: Embedder, version: str = "chunk-embed/v1") -> None:
         self._embedder = embedder
-        self.version = f"{version}+{type(embedder).__name__}(dim={embedder.dim})"
+        identity = getattr(embedder, 'identity', None)
+        if not isinstance(identity, str) or not identity:
+            raise ValueError('embedder must expose an explicit configuration identity')
+        self.version = f"{version}+{digest({'embedder': identity, 'dim': embedder.dim})}"
 
     def contextualize(self, raw: RawRecord) -> list[ContextRecord]:
         # v1 keeps the whole content as a single chunk. Real chunking (windows,

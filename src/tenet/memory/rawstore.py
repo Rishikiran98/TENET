@@ -26,6 +26,8 @@ class RawStore(Protocol):
     def list(self, namespace: str | None = None) -> list[RawRecord]:
         ...
 
+    def empty(self): ...
+
     def clear(self) -> None:
         ...
 
@@ -52,3 +54,6 @@ class InMemoryRawStore:
 
     def clear(self) -> None:
         self._records.clear()
+
+    def empty(self):
+        return InMemoryRawStore()

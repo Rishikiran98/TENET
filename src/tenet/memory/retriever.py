@@ -1,29 +1,10 @@
-"""Retrieval: given a query and a grant, return the most similar context the
-grant permits the caller to read.
-
-The ordering is deliberate and is a security boundary, not a performance choice
-(§4.4). It is now the full two-stage filter the contract calls for:
-
-    1. GRANT AUTHORIZATION. The grant decides which namespaces this retrieval may
-       touch at all. A requested namespace outside the grant is denied here —
-       nothing from it ever enters the candidate set. Authority flows only from
-       the grant (§5, invariant 1); no memory content can widen it.
-    2. NAMESPACE FILTER at the storage boundary — ask the store only for records
-       in the permitted namespace(s).
-    3. SIMILARITY RANKING within that filtered set, then top-k.
-
-Doing any filter after ranking would leak the existence and ordering of memory
-the caller may not read. We don't do that.
-
-Per §5 invariant 3 the retriever enforces ``namespaces`` and nothing else; the
-grant's tools, constraints, action budget, and expiry are the gate's to enforce.
-"""
-
+"""Authorize before ranking; expiry also applies to reads."""
 from __future__ import annotations
 
 import numpy as np
 
 from ..scope import ScopeGrant
+from ..values import utc_now
 from .contextstore import ContextStore
 from .embedder import Embedder
 from .models import RetrievalResult
@@ -48,7 +29,12 @@ class Retriever:
         grant: ScopeGrant,
         namespace: str | None = None,
         limit: int = 5,
+        *, now=None,
     ) -> list[RetrievalResult]:
+        if type(limit) is not int or limit < 0:
+            raise ValueError("limit must be a nonnegative integer")
+        if grant.is_expired(utc_now() if now is None else now):
+            return []
         # 1. grant authorization: which namespaces may this retrieval read?
         #    - namespace given  -> only if the grant permits it, else denied
         #    - namespace None   -> the union of the grant's namespaces
@@ -63,7 +49,7 @@ class Retriever:
 
         # 2. namespace filter at the storage boundary
         candidates = [
-            record for ns in allowed for record in self._store.list(namespace=ns)
+            record for ns in sorted(allowed) for record in self._store.list(namespace=ns)
         ]
         if not candidates:
             return []
@@ -75,5 +61,5 @@ class Retriever:
             for r in candidates
             if r.embedding
         ]
-        scored.sort(key=lambda res: res.score, reverse=True)
+        scored.sort(key=lambda res: (-res.score, res.record.context_id))
         return scored[:limit]

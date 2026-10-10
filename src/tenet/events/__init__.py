@@ -16,6 +16,7 @@ from .envelope import (
     now_iso,
 )
 from .log import ChainError, EventLog, InMemoryEventLog
+from .sqlite import SQLiteEventLog
 from .replay import Reducer, rebuild, replay
 from . import taxonomy
 
@@ -29,6 +30,7 @@ __all__ = [
     "event_hash",
     "EventLog",
     "InMemoryEventLog",
+    "SQLiteEventLog",
     "ChainError",
     "replay",
     "rebuild",

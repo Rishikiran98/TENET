@@ -1,23 +1,10 @@
-"""MemoryCore — the memory subsystem's seam, now sitting on the event log.
-
-``ingest`` is the write path and follows the architecture exactly (§4.4):
-
-    append `memory.raw.appended` event  →  project raw store  →  contextualize
-    →  upsert context projection
-
-The event log is the source of truth. The raw store and context store are
-*projections*: ``rebuild_projections`` drops and re-folds them straight from the
-log, which is both the correctness proof (retrieval after a rebuild is identical)
-and the tamper-detection mechanism (§4.2 — re-derive over immutable raw and diff).
-
-Per D2 the v1 contextualizer is deterministic, so context is a pure projection
-and ``ingest`` emits exactly one event per record: the raw append. No
-``memory.context.derived`` events.
-"""
+"""Event-backed memory with idempotent ingestion and atomic projection rebuilds."""
 
 from __future__ import annotations
 
-from ..events import Actor, InMemoryEventLog, EventLog, new_ulid, rebuild
+from threading import RLock
+from ..values import utc_now
+from ..events import Actor, InMemoryEventLog, EventLog, new_ulid
 from ..events.taxonomy import MEMORY_RAW_APPENDED
 from ..scope import ScopeGrant
 from .contextstore import ContextStore, InMemoryContextStore
@@ -43,6 +30,13 @@ def _raw_from_event(event) -> RawRecord:
     )
 
 
+class ProjectionError(RuntimeError):
+    """Raw data was accepted; retry the same ingest_id to finish projection."""
+    def __init__(self, raw_id, ingest_id):
+        super().__init__(f"projection failed for accepted raw record {raw_id}")
+        self.raw_id, self.ingest_id = raw_id, ingest_id
+
+
 class MemoryCore:
     def __init__(
         self,
@@ -52,6 +46,7 @@ class MemoryCore:
         raw_store: RawStore | None = None,
         context_store: ContextStore | None = None,
         contextualizer: Contextualizer | None = None,
+        clock=utc_now,
     ) -> None:
         # Explicit None checks, not `or`: an empty InMemoryEventLog is falsy
         # (it defines __len__), so `log or InMemoryEventLog()` would silently
@@ -67,58 +62,66 @@ class MemoryCore:
             else ChunkEmbedContextualizer(embedder)
         )
         self._retriever = Retriever(self._context, embedder)
+        self._embedder = embedder
+        self._lock = RLock()
+        self.clock = clock
 
     @property
     def log(self) -> EventLog:
         return self._log
 
     def ingest(
-        self,
-        content: str,
-        namespace: str,
-        source: str,
-        *,
-        media_type: str = "text/plain",
-        actor: Actor | None = None,
-        correlation_id: str | None = None,
+        self, content: str, namespace: str, source: str, *,
+        media_type: str = "text/plain", actor: Actor | None = None,
+        correlation_id: str | None = None, ingest_id: str | None = None,
     ) -> RawRecord:
-        # 1. append the raw event — the source of truth. Its id is the raw_id.
-        event = self._log.append(
-            namespace=namespace,
-            actor=actor or Actor(kind="user", id="ingest"),
-            event_type=MEMORY_RAW_APPENDED,
-            payload={
-                "content": content,
-                "content_hash": content_hash(content),
-                "source": source,
-                "media_type": media_type,
-            },
-            correlation_id=correlation_id or new_ulid(),
-        )
-        # 2. project into the raw + context stores (same fold as a replay).
-        raw = _raw_from_event(event)
-        self._project(raw)
-        return raw
-
-    def _project(self, raw: RawRecord) -> None:
-        """Apply one raw record to both projections. Ingest and replay share this
-        so the live store and a rebuilt store can never diverge."""
-        self._raw.add(raw)
-        for ctx in self._contextualizer.contextualize(raw):
-            self._context.upsert(ctx)
+        ingest_id = new_ulid() if ingest_id is None else ingest_id
+        if not isinstance(ingest_id, str) or not ingest_id:
+            raise ValueError("ingest_id must be a non-empty string")
+        payload = dict(content=content, content_hash=content_hash(content),
+                       source=source, media_type=media_type, ingest_id=ingest_id)
+        with self._lock:
+            with self._log.transaction():
+                existing = [e for e in self._log if e.event_type == MEMORY_RAW_APPENDED
+                            and e.namespace == namespace
+                            and e.payload.get("ingest_id") == ingest_id]
+                if existing:
+                    event = existing[0]
+                    if dict(event.payload) != payload:
+                        raise ValueError("ingest_id already used for different content or metadata")
+                else:
+                    event = self._log.append(
+                        namespace=namespace, actor=actor or Actor(kind="user", id="ingest"),
+                        event_type=MEMORY_RAW_APPENDED, payload=payload,
+                        correlation_id=correlation_id or new_ulid())
+            raw = _raw_from_event(event)
+            try:
+                contexts = list(self._contextualizer.contextualize(raw))
+                self._raw.add(raw)
+                for ctx in contexts:
+                    self._context.upsert(ctx)
+            except Exception as exc:
+                raise ProjectionError(raw.raw_id, ingest_id) from exc
+            return raw
 
     def rebuild_projections(self) -> None:
-        """Drop and re-fold the raw + context stores from the verified log. This
-        is what makes them projections rather than authoritative state."""
-        self._raw.clear()
-        self._context.clear()
+        """Verify and build private replacements before publishing either store.
 
-        def reducer(_state: None, event) -> None:
-            if event.event_type == MEMORY_RAW_APPENDED:
-                self._project(_raw_from_event(event))
-            return None
-
-        rebuild(self._log, reducer, None)  # verifies the hash chain, then folds
+        Store adapters must provide empty() to create an unpublished projection.
+        Existing external references to stores continue to see the old snapshot.
+        """
+        with self._lock, self._log.transaction():
+            self._log.verify()
+            raw_store, context_store = self._raw.empty(), self._context.empty()
+            for event in self._log:
+                if event.event_type == MEMORY_RAW_APPENDED:
+                    raw = _raw_from_event(event)
+                    contexts = list(self._contextualizer.contextualize(raw))
+                    raw_store.add(raw)
+                    for ctx in contexts:
+                        context_store.upsert(ctx)
+            self._raw, self._context = raw_store, context_store
+            self._retriever = Retriever(self._context, self._embedder)
 
     def retrieve(
         self,
@@ -127,16 +130,21 @@ class MemoryCore:
         *,
         namespace: str | None = None,
         limit: int = 5,
+        now=None,
     ) -> list[RetrievalResult]:
         """Scope-bound retrieval. Authority comes only from ``grant``: retrieval
         can never reach memory outside the grant's namespaces (§5). Pass
         ``namespace`` to target one granted namespace, or leave it None to search
         the union of all granted namespaces."""
-        return self._retriever.retrieve(query, grant, namespace, limit)
+        with self._lock:
+            return self._retriever.retrieve(query, grant, namespace, limit,
+                                            now=self.clock() if now is None else now)
 
     # -- direct projection access (read-only helpers) ----------------------
     def raw(self, raw_id: str) -> RawRecord | None:
-        return self._raw.get(raw_id)
+        with self._lock:
+            return self._raw.get(raw_id)
 
     def context(self, context_id: str) -> ContextRecord | None:
-        return self._context.get(context_id)
+        with self._lock:
+            return self._context.get(context_id)

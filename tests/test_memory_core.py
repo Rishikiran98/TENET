@@ -5,6 +5,7 @@ the storage boundary — and the event-sourcing contract (ingest appends a raw
 event; the context store is a pure projection that rebuilds from the log).
 """
 
+import pytest
 from tenet import HashingEmbedder, MemoryCore
 from tenet.events import InMemoryEventLog
 from tenet.events.taxonomy import MEMORY_RAW_APPENDED
@@ -19,14 +20,15 @@ def _grant(*namespaces: str) -> ScopeGrant:
     return ScopeGrant.issue(principal="tester", task_id="t", namespaces=set(namespaces))
 
 
-def test_retrieval_ranks_relevant_record_first():
+@pytest.mark.parametrize("reverse", [False, True])
+def test_retrieval_ranks_relevant_record_first(reverse):
     core = _core()
-    core.ingest("deploys to us-east-1 on Fridays", namespace="a", source="x")
-    core.ingest("unrelated note about lunch menus", namespace="a", source="y")
-
-    results = core.retrieve("where does it deploy", _grant("a"), namespace="a")
-    assert results
-    assert "deploy" in results[0].record.text
+    records = ["deploys to us-east-1 on Fridays", "unrelated note about lunch menus"]
+    for text in records[::(-1 if reverse else 1)]:
+        core.ingest(text, namespace="a", source="fixture")
+    results = core.retrieve("deploys", _grant("a"), namespace="a")
+    assert "deploys" in results[0].record.text
+    assert results[0].score > results[1].score + 0.1
 
 
 def test_namespace_filter_holds_even_when_grant_permits_both():
