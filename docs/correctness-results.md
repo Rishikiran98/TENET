@@ -3,7 +3,12 @@
 Measured October 10, 2026 against original commit
 `c7a798368869dbee60923b45de2c09f3ab4d45c8`.
 
-The repair closes the reproduced correctness gaps under the A1 contract. The
+**Review update:** subsequent review found missed import and gate-constraint
+bugs plus additional limitations. The two priority bugs are now repaired; see
+[review follow-up](review-follow-up.md) for current status and the 110-test suite.
+The measurements below describe the initial repair and its selected cases.
+
+The initial repair addressed the initially reproduced gaps under A1. The
 conventional implementation matches it on the shared action cases. These results
 do not establish an advantage for TENET's event-sourced architecture.
 

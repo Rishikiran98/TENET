@@ -19,8 +19,10 @@ grant authority. This is a bounded prototype, not a hostile-host sandbox.
 5. Approved decisions bind to immutable arguments, task, grant, policy version
    and expiry. A changed binding fails closed. Justification and arguments are
    displayed as quoted untrusted content, not approval instructions.
-6. The executor independently checks tool/grant equality and supported file
-   constraints. All symlink path components are rejected. Both logical and
+6. The gate rejects unsupported constraints and logical paths outside a granted
+   path_prefix before policy or dispatch, without consuming action budget.
+   Shared logical validators perform no filesystem I/O. The executor independently
+   checks tool/grant equality and repeats supported file constraints. All symlink path components are rejected. Both logical and
    resolved paths stay in the sandbox and allowed subtree. Concurrent hostile
    filesystem mutation, hard-link provenance and OS isolation are out of scope.
 7. A dispatch event precedes an effect. An outcome follows it. A missing outcome

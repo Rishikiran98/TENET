@@ -1,17 +1,8 @@
-"""The Brain — intent generation behind a stable, LLM-swappable interface (D4).
+"""Scripted intent generation using task text and retrieved context.
 
-v1 ships a scripted deterministic stub. Rationale (from the register): the
-headline demo must be reproducible; the security claim is *architectural* and
-cannot depend on Brain quality — the threat model already assumes the Brain can
-be fooled; and an API dependency adds nothing to what v1 proves. A real-LLM
-Brain later implements this same protocol and nothing else changes (the same
-pattern as the embedder).
-
-Context reaches the Brain in the DATA channel only: it arrives as typed
-``RetrievalResult`` values, never concatenated into an instruction prompt. A
-poisoned memory can therefore *influence* a stub's or LLM's proposal (allowed —
-the gate exists for that) but it can never be executed as instructions by the
-framework itself.
+The current protocol does not receive tool or block outcomes. General multi-step
+LLM use needs an observation-history extension before interchangeability can be
+claimed. Retrieved content remains untrusted data, even in typed records.
 """
 
 from __future__ import annotations
@@ -19,7 +10,7 @@ from __future__ import annotations
 from typing import Protocol, Sequence, runtime_checkable
 
 from ..memory.models import RetrievalResult
-from .proposal import Proposal
+from ..contracts import Proposal
 
 
 @runtime_checkable

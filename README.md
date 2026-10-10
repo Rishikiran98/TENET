@@ -44,7 +44,8 @@ folded from that log. Nothing is authoritative except the log.
 - **Event log** (`src/tenet/events/`) — the spine. Envelope with ULID ids and a
   SHA-256 hash chain, a **closed event taxonomy**, an append-only
   `InMemoryEventLog`, and `replay`/`rebuild` folds. Tamper-evident: mutate any
-  past event and `verify()` raises.
+  retained event and `verify()` raises. Detecting valid suffix truncation or
+  whole-log replacement requires an independently retained external anchor.
 - **Memory core on the log** (`src/tenet/memory/`) — `MemoryCore.ingest`
   appends a `memory.raw.appended` event (the source of truth) and folds it into
   the raw store and the context store. The context store is a *pure projection*
@@ -67,7 +68,8 @@ folded from that log. Nothing is authoritative except the log.
 - **Executor + sandboxed fs tools** (`src/tenet/executor/`) — a closed tool
   registry over `fs.read`/`fs.write`/`fs.delete`, jailed to a sandbox root
   (`..`, absolute-path and symlink escapes all rejected on the resolved path).
-  Grant constraints (`path_prefix`) are re-checked at the executor — defense in
+  Logical `path_prefix` violations are blocked by the gate before dispatch.
+  Grant constraints are re-checked at the executor — defense in
   depth; it does not trust that the gate was the only path to it.
 
 ## Run it

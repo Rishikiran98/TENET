@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from ..agent.loop import ToolExecutionError
-from ..agent.proposal import Proposal
+from ..contracts import ToolExecutionError
+from ..contracts import Proposal
 from ..scope import ToolGrant
 from .fs_tools import FsDelete, FsRead, FsWrite, SandboxedFs
 

@@ -11,18 +11,8 @@ from ..gate import Gate, GateDecision, Policy, Verdict
 from ..memory import MemoryCore
 from ..scope import ScopeGrant, ToolGrant
 from .brain import Brain
-from .proposal import Proposal
+from ..contracts import Proposal, ToolExecutionError
 from ..values import digest
-
-
-class ToolExecutionError(Exception):
-    """Raised by an executor when a tool run fails. Execution failure is not a
-    policy block — the loop records it as ``action.failed``, never
-    ``action.blocked``."""
-
-    def __init__(self, message, *, outcome_unknown=False):
-        super().__init__(message)
-        self.outcome_unknown = outcome_unknown
 
 
 class AuditWriteError(RuntimeError):
