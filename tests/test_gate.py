@@ -49,17 +49,17 @@ GATE = DefaultGate()
 
 def test_policy_allow_and_escalate_pass_through():
     grant = _grant("fs.read", "fs.delete")
-    allow = GATE.evaluate(Proposal(tool="fs.read"), grant, AllowReadEscalateDelete())
+    allow = GATE.evaluate(Proposal(tool="fs.read", args={"path":"x"}), grant, AllowReadEscalateDelete())
     assert allow.verdict is Verdict.ALLOW and allow.matched_rule_ids == ("allow-read",)
 
-    esc = GATE.evaluate(Proposal(tool="fs.delete"), grant, AllowReadEscalateDelete())
+    esc = GATE.evaluate(Proposal(tool="fs.delete", args={"path":"x"}), grant, AllowReadEscalateDelete())
     assert esc.verdict is Verdict.ESCALATE and esc.matched_rule_ids == ("escalate-delete",)
 
 
 def test_tool_not_in_grant_is_denied_before_policy_runs():
     # Policy would ALLOW anything; the grant check must deny first (default-deny).
     grant = _grant("fs.read")  # fs.write not granted
-    d = GATE.evaluate(Proposal(tool="fs.write"), grant, AllowEverything())
+    d = GATE.evaluate(Proposal(tool="fs.write", args={"path":"x", "content":"x"}), grant, AllowEverything())
     assert d.verdict is Verdict.DENY
     assert "not in grant" in d.rationale
     assert d.matched_rule_ids == ()  # no policy rule was consulted
@@ -68,20 +68,20 @@ def test_tool_not_in_grant_is_denied_before_policy_runs():
 def test_expired_grant_is_denied_regardless_of_policy():
     grant = _grant("fs.read")
     past = datetime.now(timezone.utc) + timedelta(hours=2)
-    d = GATE.evaluate(Proposal(tool="fs.read"), grant, AllowEverything(), now=past)
+    d = GATE.evaluate(Proposal(tool="fs.read", args={"path":"x"}), grant, AllowEverything(), now=past)
     assert d.verdict is Verdict.DENY and "expired" in d.rationale
 
 
 def test_action_budget_exhausted_is_denied():
     grant = _grant("fs.read", max_actions=2)
-    d = GATE.evaluate(Proposal(tool="fs.read"), grant, AllowEverything(), actions_used=2)
+    d = GATE.evaluate(Proposal(tool="fs.read", args={"path":"x"}), grant, AllowEverything(), actions_used=2)
     assert d.verdict is Verdict.DENY and "budget" in d.rationale
 
 
 def test_unmatched_policy_denies_never_escalates():
     # fs.write is in the grant but no policy rule matches -> DENY, not ESCALATE.
     grant = _grant("fs.read", "fs.write")
-    d = GATE.evaluate(Proposal(tool="fs.write"), grant, AllowReadEscalateDelete())
+    d = GATE.evaluate(Proposal(tool="fs.write", args={"path":"x", "content":"x"}), grant, AllowReadEscalateDelete())
     assert d.verdict is Verdict.DENY
     assert "no policy rule matched" in d.rationale
 
@@ -107,14 +107,16 @@ def test_verdict_wiring_emits_gate_event_with_causation():
         event_type=AGENT_ACTION_PROPOSED,
         payload={"tool": proposal.tool, "args": proposal.args,
                  "justification": proposal.justification,
-                 "cited_context_ids": list(proposal.cited_context_ids)},
+                 "cited_context_ids": list(proposal.cited_context_ids),
+                 "proposal_digest": proposal.digest},
         correlation_id="task-1",
     )
     decision = GATE.evaluate(proposal, grant, AllowReadEscalateDelete())
     verdict = log.append(
         namespace="proj", actor=Actor(kind="gate", id="gate"),
         event_type=GATE_VERDICT_ISSUED,
-        payload={"verdict": decision.verdict.value,
+        payload={"proposal_ref": proposed.event_id, "phase":"initial",
+                 "verdict": decision.verdict.value,
                  "policy_version": AllowReadEscalateDelete.version,
                  "matched_rule_ids": list(decision.matched_rule_ids),
                  "rationale": decision.rationale},

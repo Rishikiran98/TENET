@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from .brain import Brain, ScriptedBrain
 from .loop import AgentLoop, Executor, StepOutcome, TaskResult
-from ..contracts import Proposal, ToolExecutionError
+from ..contracts import Proposal, ToolExecutionError, Observation
 
 __all__ = [
     "Proposal",
+    "Observation",
     "Brain",
     "ScriptedBrain",
     "AgentLoop",

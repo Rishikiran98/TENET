@@ -1,0 +1,22 @@
+{
+  "label": "after",
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "journal": "WAL",
+  "synchronous": "FULL",
+  "runs_per_size": 1,
+  "measurements": [
+    {
+      "appends": 500,
+      "seconds": 0.026177
+    },
+    {
+      "appends": 1000,
+      "seconds": 0.047211
+    },
+    {
+      "appends": 2000,
+      "seconds": 0.077806
+    }
+  ]
+}

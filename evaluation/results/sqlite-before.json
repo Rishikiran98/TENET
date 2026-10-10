@@ -1,0 +1,22 @@
+{
+  "label": "before",
+  "python": "3.12.14",
+  "sqlite": "3.53.1",
+  "journal": "WAL",
+  "synchronous": "FULL",
+  "runs_per_size": 1,
+  "measurements": [
+    {
+      "appends": 500,
+      "seconds": 0.91957
+    },
+    {
+      "appends": 1000,
+      "seconds": 3.579974
+    },
+    {
+      "appends": 2000,
+      "seconds": 14.453985
+    }
+  ]
+}

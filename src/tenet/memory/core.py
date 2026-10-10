@@ -65,6 +65,8 @@ class MemoryCore:
         self._embedder = embedder
         self._lock = RLock()
         self.clock = clock
+        if len(self._log):
+            self.rebuild_projections()
 
     @property
     def log(self) -> EventLog:

@@ -139,7 +139,7 @@ def test_loop_drives_real_executor_and_events_outcomes(tmp_path):
                      approver=FailSafeDenyApprover(), executor=ex)
     brain = ScriptedBrain([
         Proposal(tool="fs.read", args={"path": "runbook.md"}),      # executes
-        Proposal(tool="fs.read", args={"path": "../escape.txt"}),   # jailed → failed
+        Proposal(tool="fs.read", args={"path": "../escape.txt"}),   # rejected by gate
     ])
     result = loop.run_task(
         task="read the runbook",
@@ -147,9 +147,10 @@ def test_loop_drives_real_executor_and_events_outcomes(tmp_path):
     )
 
     outcomes = [s.outcome_event_type for s in result.steps]
-    assert outcomes == [T.ACTION_EXECUTED, T.ACTION_FAILED]
+    assert outcomes == [T.ACTION_EXECUTED, T.ACTION_BLOCKED]
     executed = [e for e in memory.log if e.event_type == T.ACTION_EXECUTED]
-    assert executed[0].payload["result"]["content"] == "deploy on fridays"
-    failed = [e for e in memory.log if e.event_type == T.ACTION_FAILED]
-    assert "jail" in failed[0].payload["error"]
+    assert "content" not in executed[0].payload["result"]
+    assert result.steps[0].observation.result["content"] == "deploy on fridays"
+    assert not any(e.event_type == T.ACTION_FAILED for e in memory.log)
+    assert "jail" in result.steps[1].decision.rationale
     assert memory.log.verify() is True

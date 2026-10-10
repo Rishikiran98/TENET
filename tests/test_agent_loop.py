@@ -156,7 +156,7 @@ def test_approval_surface_never_contains_memory_content():
 
 def test_max_actions_circuit_breaker_denies_after_budget():
     loop, memory, executor = _loop()
-    brain = ScriptedBrain([Proposal(tool="fs.read", args={"n": i}) for i in range(4)])
+    brain = ScriptedBrain([Proposal(tool="fs.read", args={"path": f"file-{i}"}) for i in range(4)])
 
     result = loop.run_task(task="read a lot", grant=_grant("fs.read", max_actions=2),
                            brain=brain, namespace="proj")
@@ -171,7 +171,7 @@ def test_max_actions_circuit_breaker_denies_after_budget():
 
 def test_execution_failure_is_failed_not_blocked():
     loop, memory, executor = _loop(executor=RecordingExecutor(fail=True))
-    brain = ScriptedBrain([Proposal(tool="fs.read", args={})])
+    brain = ScriptedBrain([Proposal(tool="fs.read", args={"path":"x"})])
 
     result = loop.run_task(task="read", grant=_grant("fs.read"),
                            brain=brain, namespace="proj")
@@ -184,8 +184,8 @@ def test_execution_failure_is_failed_not_blocked():
 def test_step_limit_aborts_the_task():
     class NeverDoneBrain:
         id = "never-done"
-        def propose(self, task, context):
-            return Proposal(tool="fs.read", args={})
+        def propose(self, task, context, *, observations):
+            return Proposal(tool="fs.read", args={"path":"x"})
 
     loop, memory, _ = _loop(max_steps=3)
     result = loop.run_task(task="loop forever", grant=_grant("fs.read"),

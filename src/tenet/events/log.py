@@ -2,7 +2,7 @@
 
 Everything else (context store, audit view, step history) is a fold over this
 log, not a separate system. The log therefore has exactly two jobs: append
-validated events, and prove it has not been tampered with.
+validated events, and check internal chain integrity. Completeness requires an external anchor.
 
 ``EventLog`` is the interface; ``InMemoryEventLog`` is the v1 implementation. A
 Postgres-backed log implements the same interface later (an ``events`` table
@@ -25,7 +25,7 @@ from .envelope import (
     new_ulid,
     now_iso,
 )
-from .taxonomy import validate_payload
+from .taxonomy import validate_payload, CURRENT_SCHEMA_VERSION
 
 
 class ChainError(Exception):
@@ -43,7 +43,7 @@ class EventLog(Protocol):
         payload: dict,
         correlation_id: str,
         causation_id: str | None = None,
-        schema_version: int = 1,
+        schema_version: int = CURRENT_SCHEMA_VERSION,
     ) -> Event: ...
 
     def __iter__(self) -> Iterator[Event]: ...
@@ -63,6 +63,7 @@ class InMemoryEventLog:
     def __init__(self) -> None:
         self._events: list[Event] = []
         self._lock = RLock()
+        self._event_ids = set()
 
     @contextmanager
     def transaction(self):
@@ -72,6 +73,8 @@ class InMemoryEventLog:
             try:
                 yield
             except BaseException:
+                for event in self._events[start:]:
+                    self._event_ids.discard(event.event_id)
                 del self._events[start:]
                 raise
 
@@ -87,20 +90,20 @@ class InMemoryEventLog:
         payload: dict,
         correlation_id: str,
         causation_id: str | None = None,
-        schema_version: int = 1,
+        schema_version: int = CURRENT_SCHEMA_VERSION,
     ) -> Event:
         with self.transaction():
             if not isinstance(namespace, str) or not namespace:
                 raise ValueError("every event must carry a namespace")
             if not isinstance(correlation_id, str) or not correlation_id:
                 raise ValueError("correlation_id must be non-empty")
-            if type(schema_version) is not int or schema_version != 1:
+            if type(schema_version) is not int or schema_version != CURRENT_SCHEMA_VERSION:
                 raise ValueError("unsupported schema_version")
             if not isinstance(actor, Actor):
                 raise ValueError("invalid actor")
             payload = freeze(payload)
-            validate_payload(event_type, payload)
-            if causation_id is not None and not any(e.event_id == causation_id for e in self._events):
+            validate_payload(event_type, payload, schema_version)
+            if causation_id is not None and causation_id not in self._event_ids:
                 raise ValueError("unknown causation_id")
             fields = dict(event_id=new_ulid(), ts=now_iso(), namespace=namespace,
                           actor=actor, event_type=event_type, payload=payload,
@@ -109,6 +112,7 @@ class InMemoryEventLog:
             event = Event(**fields, hash=compute_hash(**fields))
             self._persist(event)
             self._events.append(event)
+            self._event_ids.add(event.event_id)
             return event
 
     def __iter__(self) -> Iterator[Event]:
@@ -128,7 +132,15 @@ class InMemoryEventLog:
         """Walk the chain from genesis; raise ``ChainError`` on the first broken
         link or tampered event. Returns True if the whole log verifies."""
         prev = GENESIS_HASH
+        seen = set()
         for event in self:
+            try:
+                validate_payload(event.event_type, event.payload, event.schema_version)
+            except ValueError as exc:
+                raise ChainError(f'invalid event schema at {event.event_id}: {exc}') from exc
+            if event.event_id in seen:
+                raise ChainError(f'duplicate event ID: {event.event_id}')
+            seen.add(event.event_id)
             if event.prev_hash != prev:
                 raise ChainError(
                     f"broken link at {event.event_id}: prev_hash does not match "

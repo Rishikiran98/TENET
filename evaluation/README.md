@@ -49,3 +49,25 @@ output is incidental, not a performance benchmark.
 
 The nine cases were selected from known correctness findings. They are not a
 random sample, a prompt-injection success-rate estimate, or a novelty test.
+
+## Follow-up review validation (0.3.0)
+
+The latest patch uses write schema 2 and an observation-aware Brain protocol.
+The original comparison is unchanged; its adapter still supports the original
+source API. Current follow-up results are recorded separately in
+`results/review2-comparison.json`, `review2-crash-boundary.json`, and
+`review2-pytest.txt`. The original result files remain historical evidence.
+
+Append scaling:
+
+```bash
+PYTHONPATH=src python evaluation/sqlite_scaling.py --label after
+mkdir -p /tmp/tenet-before-incremental
+git archive ac05117454f287245458e02212a7af2e05c4218f | tar -x -C /tmp/tenet-before-incremental
+PYTHONPATH=/tmp/tenet-before-incremental/src python evaluation/sqlite_scaling.py --label before
+```
+
+On a fresh GitHub checkout, substitute `ded3e5ed6fc190cad68bab7d804127b940536952`
+for the local before commit. Their trees are identical. Run both measurements
+on the same machine for a useful local comparison. The recorded experiment uses
+one run at each size and makes no production throughput guarantee.

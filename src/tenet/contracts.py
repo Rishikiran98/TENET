@@ -36,3 +36,18 @@ class ToolExecutionError(Exception):
     def __init__(self, message, *, outcome_unknown=False):
         super().__init__(message)
         self.outcome_unknown = outcome_unknown
+
+
+@dataclass(frozen=True)
+class Observation:
+    """A previous step for the Brain. Tool output is untrusted, immutable data."""
+    proposal: Proposal
+    event_id: str
+    outcome_event_type: str
+    result: Mapping | None = None
+    error: str | None = None
+    rationale: str = ""
+
+    def __post_init__(self):
+        if self.result is not None:
+            object.__setattr__(self, 'result', freeze(self.result))

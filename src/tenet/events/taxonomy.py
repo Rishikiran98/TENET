@@ -11,6 +11,8 @@ Amendment A1 adds dispatch and indeterminate outcomes, for 15 event types.
 
 from __future__ import annotations
 from collections.abc import Mapping
+from datetime import datetime
+import re
 
 # --- memory ---------------------------------------------------------------
 MEMORY_RAW_APPENDED = "memory.raw.appended"
@@ -67,7 +69,20 @@ def is_known(event_type: str) -> bool:
     return event_type in TAXONOMY
 
 
-def validate_payload(event_type: str, payload: dict) -> None:
+CURRENT_SCHEMA_VERSION = 2
+V2_REQUIRED = {
+    AGENT_ACTION_PROPOSED: {'proposal_digest'},
+    GATE_VERDICT_ISSUED: {'proposal_ref', 'phase'},
+    APPROVAL_REQUESTED: {'binding'},
+    APPROVAL_DECIDED: {'proposal_ref', 'binding'},
+    ACTION_DISPATCHED: {'accepted_at'},
+    ACTION_EXECUTED: {'operation_id', 'proposal_digest', 'grant_id'},
+    ACTION_FAILED: {'operation_id', 'proposal_digest', 'grant_id'},
+    ACTION_INDETERMINATE: {'proposal_digest', 'grant_id'},
+}
+
+
+def validate_payload(event_type: str, payload: dict, schema_version=CURRENT_SCHEMA_VERSION) -> None:
     """Raise ``ValueError`` unless ``event_type`` is in the closed taxonomy and
     ``payload`` carries at least its required keys."""
     if event_type not in TAXONOMY:
@@ -76,7 +91,10 @@ def validate_payload(event_type: str, payload: dict) -> None:
         )
     if not isinstance(payload, Mapping):
         raise ValueError(f"{event_type} payload must be a dict, got {type(payload).__name__}")
-    missing = REQUIRED_PAYLOAD_KEYS[event_type] - payload.keys()
+    if type(schema_version) is not int or schema_version not in {1, CURRENT_SCHEMA_VERSION}:
+        raise ValueError('unsupported schema_version')
+    required = REQUIRED_PAYLOAD_KEYS[event_type] | (V2_REQUIRED.get(event_type, set()) if schema_version == 2 else set())
+    missing = required - payload.keys()
     if missing:
         raise ValueError(
             f"{event_type} payload missing required keys: {sorted(missing)}"
@@ -85,8 +103,9 @@ def validate_payload(event_type: str, payload: dict) -> None:
                    'contextualizer_version', 'description', 'summary', 'reason',
                    'query', 'tool', 'justification', 'verdict', 'policy_version',
                    'rationale', 'proposal_ref', 'verdict_ref', 'decision',
-                   'approver_id', 'error', 'operation_id', 'proposal_digest', 'grant_id'}
-    for key in REQUIRED_PAYLOAD_KEYS[event_type] & string_keys:
+                   'approver_id', 'error', 'operation_id', 'proposal_digest', 'grant_id',
+                   'binding', 'accepted_at', 'phase'}
+    for key in required & string_keys:
         if not isinstance(payload[key], str):
             raise ValueError(f'{key} must be a string')
     for key in ('args', 'grant'):
@@ -100,3 +119,25 @@ def validate_payload(event_type: str, payload: dict) -> None:
         raise ValueError('invalid verdict')
     if event_type == APPROVAL_DECIDED and payload['decision'] not in {'approve', 'reject'}:
         raise ValueError('invalid approval decision')
+
+    if schema_version == 2:
+        for key in ('operation_id', 'grant_id', 'proposal_ref'):
+            if key in required and not payload[key]:
+                raise ValueError(f'{key} must not be empty')
+        for key in ('proposal_digest', 'binding'):
+            if key in required:
+                value = payload[key]
+                if key == 'binding' and event_type == APPROVAL_DECIDED and payload['decision'] == 'reject':
+                    # A rejected approval may have supplied no binding or an invalid one.
+                    continue
+                if re.fullmatch(r'[a-f0-9]{64}', value) is None:
+                    raise ValueError(f'{key} must be a SHA-256 hex digest')
+        if event_type == GATE_VERDICT_ISSUED and payload['phase'] not in {'initial', 'dispatch'}:
+            raise ValueError('invalid gate phase')
+        if event_type == ACTION_DISPATCHED:
+            try:
+                moment = datetime.fromisoformat(payload['accepted_at'])
+                if moment.tzinfo is None:
+                    raise ValueError('timezone required')
+            except ValueError as exc:
+                raise ValueError('accepted_at must be an aware ISO timestamp') from exc

@@ -5,7 +5,7 @@ Measured October 10, 2026 against original commit
 
 **Review update:** subsequent review found missed import and gate-constraint
 bugs plus additional limitations. The two priority bugs are now repaired; see
-[review follow-up](review-follow-up.md) for current status and the 110-test suite.
+[review follow-up](review-follow-up.md) for current status and the 161-test suite.
 The measurements below describe the initial repair and its selected cases.
 
 The initial repair addressed the initially reproduced gaps under A1. The
@@ -14,7 +14,7 @@ do not establish an advantage for TENET's event-sourced architecture.
 
 ## Evidence
 
-The repaired test suite passes **75 tests**. The original suite had 42 tests.
+The initial repaired test suite passed **75 tests**. The original suite had 42 tests.
 The added coverage includes immutable nested values, task/grant reuse and races,
 approval expiry and replay, filesystem constraints, projection failure and retry,
 concurrent event appends, citation membership, durable reopen, dispatch/outcome

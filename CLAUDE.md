@@ -1,7 +1,8 @@
 # TENET — Architecture & Design (v1, Final)
 
-**October 2026 amendment:** [Correctness contract A1](docs/correctness-contract.md)
-supersedes conflicting guarantees below, including read expiry, one-use task
+**October 2026 amendments:** [A1](docs/correctness-contract.md) and
+[A2](docs/correctness-contract-a2.md)
+supersede conflicting guarantees below, including read expiry, one-use task
 registration, approval binding, immutable payloads and failure/replay semantics.
 It records the changes authorized by the correctness action plan.
 
@@ -28,20 +29,21 @@ order of §12; do not build ahead of it.
   wholesale replacement without an independently retained anchor.
 - **Memory:** raw ingestion, optional idempotency keys, deterministic context
   projections, and atomic verified rebuilds. Retrieval enforces namespace and
-  expiry before ranking. An existing durable log currently needs an explicit
-  `rebuild_projections()` after constructing MemoryCore. Automatic hydration and
-  efficient incremental SQLite loading remain open review items.
+  expiry before ranking. Construction on an existing log performs verified
+  hydration before returning. SQLite appends load new sequence rows only;
+  explicit verification rereads the full database.
 - **Contracts:** `Proposal` and `ToolExecutionError` live in neutral
   `src/tenet/contracts.py`. Existing agent imports remain compatibility aliases.
 - **Gate:** grant checks precede policy. The gate enforces expiry, action budget,
-  tool membership, and logical `path_prefix` constraints through pure validators
+  tool membership, built-in argument schemas, and logical path constraints through pure validators
   in `constraints.py`. Unsupported constraints fail closed. It does not inspect
   the filesystem. Production policy remains Sai's to author under D8.
 - **Agent and approvals:** single-use task/grant claims, bound approval decisions,
   dispatch-before-effect and outcome receipts, and fail-closed continuation on
   uncertain effects. Agent-provided approval text is quoted as untrusted data;
-  it can contain relayed memory content. The current Brain protocol lacks outcome
-  feedback and is not yet a sufficient interface for general multi-step LLM work.
+  it can contain relayed memory content. Brains receive immutable observations
+  for prior steps. Reads return at most 4 KiB of text to the Brain and log only
+  digest/size metadata. No real LLM integration has been evaluated.
 - **Executor:** closed filesystem registry, tool/grant equality checks, repeated
   logical path checks, real-path containment, and rejection of symlink components.
   A logical path outside the grant is denied by the default gate as
@@ -159,9 +161,9 @@ of a valid suffix or replacement of the whole chain without an external anchor.
 | `task.completed` / `task.aborted` | agent/system | summary, reason |
 | `agent.retrieval.performed` | agent | query, scope applied, result context_ids + scores |
 | `agent.action.proposed` | agent | Proposal: tool, args, justification, cited context_ids |
-| `gate.verdict.issued` | gate | verdict (allow/deny/escalate), policy_version, matched_rule_ids, rationale |
-| `approval.requested` | system | proposal ref, rendered approval surface |
-| `approval.decided` | approver | approve/reject, approver id, note |
+| `gate.verdict.issued` | gate | proposal_ref, phase, verdict, policy_version, matched_rule_ids, rationale |
+| `approval.requested` | system | proposal_ref, binding, rendered approval surface |
+| `approval.decided` | approver | proposal_ref, binding, approve/reject, approver id, note |
 | `action.dispatched` | system | operation ID, proposal digest, grant ID, accepted time |
 | `action.executed` | tool | observation/result, exit status, operation binding |
 | `action.blocked` | system | proposal ref, verdict ref |
@@ -336,10 +338,11 @@ task.initiated (user: task + ScopeGrant)
   └► loop or finish      → task.completed | task.aborted
 ```
 
-**Brain (D4):** the current scripted stub receives task text and retrieved
-context. It does not receive outcomes, so the interface must be extended before
-claiming general multi-step LLM interchangeability. A typed observation history
-is an open follow-up, including success, blocked, failed, and indeterminate steps.
+**Brain (D4, amended by A2):** the scripted stub and custom Brains receive task,
+retrieved context, and immutable `observations` of prior steps. A deterministic
+adaptive test covers block, failure, and success feedback. Indeterminate effects
+stop continuation and remain visible in TaskResult. No real LLM integration is
+claimed validated. Brains must accept the observations keyword.
 
 **Approver:** CLI, scripted, and fail-safe implementations consume a request
 bound to the proposal occurrence, task, grant, policy version, and expiry.
@@ -359,7 +362,8 @@ gift them.
   `fs.delete`) rooted in a sandbox directory. Constraint enforcement
   (path-prefix, etc.) happens *again* at the executor — defense in depth; the
   executor does not trust that the gate was the only path to it.
-- Tool observations are appended as events. **Replay never re-executes side
+- Outcome receipts are appended as events. Read text is omitted; its bounded
+  prefix reaches the Brain while only digest and size metadata reach the log. **Replay never re-executes side
   effects** — replay folds events into projections; the executor is only ever
   driven by live verdicts.
 
@@ -412,7 +416,7 @@ tenet/
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
-  contracts.py     Proposal, ToolExecutionError
+  contracts.py     Proposal, Observation, ToolExecutionError
   constraints.py   pure logical constraint validators
   agent/           proposal.py (compatibility alias), brain.py (scripted), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
@@ -427,8 +431,10 @@ The structural audit lives in `events/audit.py`; a richer audit presentation and
 the original headline demo remain pending. Policy content is still Sai's.
 
 Storage: raw and context projections are in memory. The authoritative log can be
-in memory or SQLite. SQLite currently reloads the full table on transactions,
-which makes repeated appends quadratic; incremental loading is an open follow-up.
+in memory or SQLite. SQLite appends synchronize rows after the last seen
+sequence; rollback and explicit verification reload retained history. MemoryCore
+hydrates from a populated log at construction. Multiple active projection
+instances still require caller-managed refresh.
 Postgres, pgvector, and FastAPI are not implemented.
 
 ---
