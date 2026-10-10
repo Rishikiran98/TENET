@@ -1,5 +1,10 @@
 # TENET — Architecture & Design (v1, Final)
 
+**October 2026 amendment:** [Correctness contract A1](docs/correctness-contract.md)
+supersedes conflicting guarantees below, including read expiry, one-use task
+registration, approval binding, immutable payloads and failure/replay semantics.
+It records the changes authorized by the correctness action plan.
+
 **Status:** Accepted — full decision register ratified 2026-07-01
 **Date:** 2026-07-01
 **Supersedes:** HIEROMEM scope; tenet-action-plan.md architecture sections

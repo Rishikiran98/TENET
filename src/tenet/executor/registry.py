@@ -48,6 +48,8 @@ class RegistryExecutor:
         self._registry = registry
 
     def execute(self, proposal: Proposal, tool_grant: ToolGrant) -> dict:
+        if proposal.tool != tool_grant.tool:
+            raise ToolExecutionError("proposal tool does not match tool grant")
         tool = self._registry.get(proposal.tool)
         if tool is None:
             raise ToolExecutionError(

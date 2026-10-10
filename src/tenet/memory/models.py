@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+import math
 
 
 def content_hash(text: str) -> str:
@@ -53,10 +54,16 @@ class ContextRecord:
     raw_id: str                   # provenance: which raw record this derives from
     namespace: str                # inherited from the raw record
     text: str                     # the (possibly chunked) derived text
-    embedding: list[float]        # derived projection of `text`
+    embedding: tuple[float, ...]        # derived projection of `text`
     contextualizer_version: str   # which transform produced this
     raw_content_hash: str         # provenance: hash of the canonical raw content
     source: str                   # provenance: carried through from raw
+
+    def __post_init__(self):
+        values = tuple(float(v) for v in self.embedding)
+        if any(not math.isfinite(v) for v in values):
+            raise ValueError('embedding must contain finite values')
+        object.__setattr__(self, 'embedding', values)
 
 
 @dataclass(frozen=True)

@@ -7,6 +7,18 @@ it. v1 proves a principle, *governed memory*, not a hardened security product.
 The full design contract — threat model, architecture, decision register, and
 build order — lives in [CLAUDE.md](CLAUDE.md). Read it before changing anything.
 
+## Correctness repair and comparison
+
+The [A1 correctness contract](docs/correctness-contract.md) supersedes conflicting
+prototype guarantees in the original design. The repair includes immutable
+records, single-use task/grant claims, bound approvals, dispatch expiry checks,
+symlink rejection, ingestion retry keys, atomic projection rebuilds, and an
+optional `SQLiteEventLog` for durability. In-memory logs remain process-local.
+
+See [measured results and limitations](docs/correctness-results.md) and
+[evaluation reproduction instructions](evaluation/README.md). This is a bounded
+correctness comparison, not evidence that TENET outperforms conventional code.
+
 ## The one idea
 
 An agent's memory is a security surface. Tenet is **event-sourced end to end**:
@@ -50,7 +62,8 @@ folded from that log. Nothing is authoritative except the log.
   deterministic `ScriptedBrain` (LLM-swappable), and `AgentLoop`: task →
   retrieve (as data) → propose → gate → approve/execute/block, every hop an
   event with an intact why-chain. Escalations fail closed; the approval surface
-  never carries memory content.
+  labels agent-provided arguments and justification as untrusted, since they
+  can relay memory content.
 - **Executor + sandboxed fs tools** (`src/tenet/executor/`) — a closed tool
   registry over `fs.read`/`fs.write`/`fs.delete`, jailed to a sandbox root
   (`..`, absolute-path and symlink escapes all rejected on the resolved path).

@@ -1,0 +1,18 @@
+Ingested 3 records → 3 events (chain verifies: True)
+
+Query: 'where does the project deploy?'  (grant: ['project-alpha'], asking: project-alpha)
+
+  score=0.283  [project-alpha: alpha/runbook.md]  The alpha project deploys to us-east-1 on Fridays.
+  score=0.000  [project-alpha: alpha/ops-notes.md]  Alpha's database backups run nightly at 02:00 UTC.
+
+Query: 'backups in Glacier'  (grant: ['project-alpha'], asking: project-beta)
+
+  (nothing — denied or empty)
+
+Query: 'backups in Glacier'  (grant: ['project-alpha', 'project-beta'], asking: any of ['project-alpha', 'project-beta'])
+
+  score=0.480  [project-beta: beta/runbook.md]  The beta project deploys to eu-west-1 and stores backups in Glacier.
+  score=0.183  [project-alpha: alpha/ops-notes.md]  Alpha's database backups run nightly at 02:00 UTC.
+  score=0.000  [project-alpha: alpha/runbook.md]  The alpha project deploys to us-east-1 on Fridays.
+
+Rebuilt context store from the log. Retrieval identical? True  (expected: True)

@@ -28,6 +28,7 @@ _TOKEN = re.compile(r"[a-z0-9]+")
 @runtime_checkable
 class Embedder(Protocol):
     dim: int
+    identity: str
 
     def embed(self, text: str) -> list[float]:
         ...
@@ -42,7 +43,10 @@ class HashingEmbedder:
     """
 
     def __init__(self, dim: int = 256) -> None:
+        if type(dim) is not int or dim <= 0:
+            raise ValueError('embedding dimension must be positive')
         self.dim = dim
+        self.identity = f'hashing/sha1-ascii-token-l2/v1/dim={dim}'
 
     def _bucket(self, token: str) -> int:
         h = hashlib.sha1(token.encode("utf-8")).digest()
@@ -65,16 +69,22 @@ class SentenceTransformerEmbedder:
     Nothing else changes.
     """
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", *, revision: str) -> None:
+        if not isinstance(revision, str) or re.fullmatch(r"[a-fA-F0-9]{40}", revision) is None:
+            raise ValueError("revision must be an immutable 40-character model commit")
         try:
             from sentence_transformers import SentenceTransformer
+            from importlib.metadata import version
         except ImportError as exc:  # pragma: no cover
             raise ImportError(
                 "SentenceTransformerEmbedder needs sentence-transformers:\n"
                 "    pip install sentence-transformers"
             ) from exc
-        self._model = SentenceTransformer(model_name)
+        self._model = SentenceTransformer(model_name, revision=revision)
         self.dim = self._model.get_sentence_embedding_dimension()
+        self.identity = (f'sentence-transformers/{model_name}@{revision}/normalized/dim={self.dim}'
+                         f'/sentence-transformers={version("sentence-transformers")}'
+                         f'/transformers={version("transformers")}/torch={version("torch")}')
 
     def embed(self, text: str) -> list[float]:
         return self._model.encode(text, normalize_embeddings=True).tolist()

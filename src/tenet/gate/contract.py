@@ -46,6 +46,15 @@ class GateDecision:
     matched_rule_ids: tuple[str, ...]
     rationale: str                  # human-readable; lands in the audit trail
 
+    def __post_init__(self):
+        if not isinstance(self.verdict, Verdict):
+            raise ValueError("invalid verdict")
+        if isinstance(self.matched_rule_ids, str) or any(
+            not isinstance(rule, str) for rule in self.matched_rule_ids
+        ):
+            raise ValueError("rule IDs must be a sequence of strings")
+        object.__setattr__(self, 'matched_rule_ids', tuple(self.matched_rule_ids))
+
     @property
     def allowed(self) -> bool:
         return self.verdict is Verdict.ALLOW
@@ -79,8 +88,9 @@ class Gate(Protocol):
 
 
 class DefaultGate:
-    """The gate mechanism. Pure: identical inputs always yield the identical
-    decision, and nothing here performs a side effect."""
+    """The gate mechanism. Supply now explicitly for deterministic evaluation.
+    The convenience default reads wall-clock time; the agent loop injects it.
+    """
 
     def evaluate(
         self,
@@ -91,6 +101,8 @@ class DefaultGate:
         now: datetime | None = None,
         actions_used: int = 0,
     ) -> GateDecision:
+        if type(actions_used) is not int or actions_used < 0:
+            raise ValueError("actions_used must be a nonnegative integer")
         # 1. grant authority — default-deny, before any policy rule is consulted
         if grant.is_expired(now):
             return GateDecision(Verdict.DENY, (), "grant expired")

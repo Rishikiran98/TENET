@@ -29,6 +29,8 @@ class ContextStore(Protocol):
     def list(self, namespace: str | None = None) -> list[ContextRecord]:
         ...
 
+    def empty(self): ...
+
     def clear(self) -> None:
         ...
 
@@ -55,3 +57,6 @@ class InMemoryContextStore:
 
     def clear(self) -> None:
         self._records.clear()
+
+    def empty(self):
+        return InMemoryContextStore()

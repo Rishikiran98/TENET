@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-10",
+  "python": "3.12.14",
+  "numpy": "2.3.5",
+  "sqlite": "3.53.1",
+  "original_commit": "c7a798368869dbee60923b45de2c09f3ab4d45c8",
+  "method": "deterministic fixture cases; no LLM or performance benchmark"
+}
