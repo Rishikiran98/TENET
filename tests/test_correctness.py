@@ -46,7 +46,7 @@ def runner(memory, executor, **kwargs):
 
 def run(loop, g, proposal=None):
     return loop.run_task(task='read', grant=g, namespace='n',
-                         brain=ScriptedBrain([proposal or Proposal('fs.read')]))
+                         brain=ScriptedBrain([proposal or Proposal('fs.read', {'path':'x'})]))
 
 
 def test_event_and_intent_are_deep_snapshots():
@@ -235,7 +235,7 @@ def test_uncertain_effect_aborts_without_next_action():
             raise OSError('connection lost after effect')
     m = MemoryCore(HashingEmbedder()); ex = Partial()
     result = runner(m, ex).run_task(task='read', grant=grant(), namespace='n',
-                                  brain=ScriptedBrain([Proposal('fs.read'), Proposal('fs.read')]))
+                                  brain=ScriptedBrain([Proposal('fs.read', {'path':'x'}), Proposal('fs.read', {'path':'x'})]))
     assert not result.completed and len(ex.calls) == 1
     report = audit_trace(m.log)
     assert not report.issues and len(report.indeterminate_operations) == 1
@@ -249,7 +249,7 @@ def test_failed_attempt_consumes_budget_and_audits_cleanly():
             raise ToolExecutionError('no file')
     m = MemoryCore(HashingEmbedder()); ex = Failure()
     result = runner(m, ex).run_task(task='read', grant=grant(max_actions=1), namespace='n',
-                                  brain=ScriptedBrain([Proposal('fs.read'), Proposal('fs.read')]))
+                                  brain=ScriptedBrain([Proposal('fs.read', {'path':'x'}), Proposal('fs.read', {'path':'x'})]))
     assert [s.outcome_event_type for s in result.steps] == [T.ACTION_FAILED, T.ACTION_BLOCKED]
     assert len(ex.calls) == 1
     assert audit_trace(m.log).issues == ()
@@ -319,7 +319,7 @@ def test_approval_cannot_be_reused_for_a_second_proposal():
     m = MemoryCore(HashingEmbedder()); ex = Recorder()
     result = runner(m, ex, policy=Escalate(), approver=ReplayApproval()).run_task(
         task='read', grant=grant(max_actions=2), namespace='n',
-        brain=ScriptedBrain([Proposal('fs.read'), Proposal('fs.read')]))
+        brain=ScriptedBrain([Proposal('fs.read', {'path':'x'}), Proposal('fs.read', {'path':'x'})]))
     assert len(ex.calls) == 1
     assert result.steps[1].outcome_event_type == T.ACTION_BLOCKED
 
@@ -336,5 +336,5 @@ def test_audit_reports_orphan_outcome():
     from tenet.events.audit import audit_trace
     log = InMemoryEventLog()
     log.append(namespace='n', actor=Actor('tool','fs.read'), event_type=T.ACTION_EXECUTED,
-               payload={'result':{}, 'exit_status':'ok', 'operation_id':'missing'}, correlation_id='t')
+               payload={'result':{}, 'exit_status':'ok', 'operation_id':'missing', 'proposal_digest':'a'*64, 'grant_id':'g'}, correlation_id='t')
     assert 'outcome without matching dispatch' in audit_trace(log).issues[0]

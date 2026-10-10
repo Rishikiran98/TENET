@@ -1,53 +1,66 @@
-# Review corrections and remaining work
+# Review status and validation
 
-October 10, 2026. This patch prioritizes the two requested blockers: independent
-public imports and enforcement of granted logical paths before dispatch.
-The earlier claim that the repair closed the correctness gaps was too broad.
-The 75-test suite and nine-case comparison missed these contract violations.
+Updated October 10, 2026 for version 0.3.0. The six previously open items and the
+three argument-validation observations are addressed in this patch. The earlier
+75-test and 110-test results were incomplete evidence; the current suite passes
+161 tests. This is evidence for the tested contracts, not a claim of exhaustive
+correctness or production readiness.
 
-## Fixed in this patch
-
-1. **Circular imports:** `Proposal` and `ToolExecutionError` now live in neutral
-   `tenet.contracts`. The gate and executor no longer depend on agent package
-   initialization. Existing agent imports remain aliases. Five separate fresh
-   interpreters exercise the public entry points.
-2. **Gate path authority:** logical `path_prefix` checks precede policy, approval,
-   and dispatch. Unsupported and malformed constraints fail closed. The gate
-   does no filesystem I/O; the executor independently repeats logical validation
-   and checks symlinks and real-path containment. An out-of-prefix request emits
-   `action.blocked` and does not consume budget. One integration regression blocks
-   a protected delete, then successfully deletes an allowed note with budget one.
-3. **Audit path checks:** a trace containing an out-of-prefix dispatch is flagged,
-   even when a custom gate allowed it and the executor refused it. This fixes
-   the path-specific audit omission; proposal-causal authorization matching is
-   still pending below.
-4. **Documentation and metadata:** implementation status, module layout, event
-   count, gate responsibility, and the hash-chain truncation caveat are corrected.
-   Package metadata now matches the existing runtime version, 0.2.0.
-   `requirements.txt` delegates to `pyproject.toml` to avoid dependency drift.
-
-The new regression file initially produced 29 failures and 6 passes. After the
-fix, the complete suite passes 110 tests. The old comparison is a bounded
-historical result; it should not be treated as exhaustive correctness evidence.
-
-## Remaining work, in suggested order
-
-| Issue | Current behavior | Concrete acceptance criterion |
+| Review item | Implemented behavior | Evidence |
 |---|---|---|
-| Proposal-causal audit matching | Verdicts and approval status are keyed by task | An approval or allow verdict for proposal A cannot justify proposal B, including interleaved or malformed traces; follow causal references and check task identity. |
-| Required receipt fields | Several A1 fields are optional at append time | Missing or invalid dispatch time, approval binding, and outcome operation binding are rejected under an explicit schema version; preserve a defined A0 read path. |
-| Brain outcome feedback | Every proposal sees task text and the same retrieval | A deterministic adaptive Brain uses prior success, block, and failure observations to choose a different next step; observations are immutable and remain untrusted. |
-| Unbounded read receipts | Full fs.read text is copied into permanent events | Define a byte cap and truncation marker, or an access-controlled content reference with a digest; test large and multibyte input and define retention. |
-| SQLite full-table reloads | Every transaction parses all retained events | Load incrementally by sequence, preserve rollback and cross-connection visibility, and demonstrate improved append scaling at 500, 1,000, and 2,000 events. |
-| Reopen hydration | Existing logs require explicit rebuild before retrieval | Reopening a populated log yields usable projections by default, or construction fails clearly; hydration failure must not silently present an empty memory. |
+| Audit matching | Follows proposal-specific causal references through initial verdict, approval request/decision, dispatch verdict, and outcome. Checks task and namespace identity. Recomputes request bindings. | Borrowed verdicts/approvals, fabricated matching bindings, cross-task references, and valid interleaved traces in `test_causal_audit.py`. |
+| Required receipt fields | New appends use schema 2. Dispatch time, approval bindings, and outcome operation/digest/grant bindings are mandatory and type-checked. Verdicts identify proposal and phase. | Missing-field and invalid-time regressions; legacy SQLite rows remain readable, while schema-1 appends are rejected. |
+| Brain feedback | `propose(task, context, *, observations=...)` receives an immutable history. Step results expose the same observations. | An adaptive Brain responds to a block, a missing-file failure, and a successful read, then completes. |
+| Read receipts | Reads return at most 4,096 bytes of valid UTF-8 text. The Brain receives that bounded text; new read outcome events omit it and retain metadata plus the returned-prefix SHA-256. | Large/multibyte files, UTF-8 boundaries, invalid encoding, and an oversized custom-executor result. |
+| SQLite scaling | Normal transactions load only rows after the connection's last sequence. Rollback restores surviving state. `verify()` explicitly rereads all rows. | Decode-count regression, separate writers, nested rollback, disk-tampering check, and measured append scaling below. |
+| Reopen hydration | MemoryCore automatically verifies and rebuilds projections from a populated log before construction returns. Failure propagates. | Retrieval after reopen without manual rebuild; explicit contextualizer failure during construction. |
+| Unconstrained arguments | Built-in filesystem schemas are checked even with an empty constraints mapping. Missing, malformed, and unsupported arguments are blocked before dispatch. | An invalid proposal followed by a valid read still succeeds with budget one. |
+| Additional path operands | Current tools reject extra fields such as `dest`. Unknown `fs.*` tools fail closed until an explicit schema is implemented. | Extra-destination and future-copy regressions. No copy/move tool was added. |
+| Backslashes | Logical paths and prefixes reject backslashes, colons, and trailing-dot/space components on every platform; resolved paths must also stay within the granted prefix. | Gate and direct-executor lexical tests run on Linux. Native Windows integration was not run. |
 
-The SQLite timings in the review were supplied by the reviewer; this focused
-patch did not rerun that scaling experiment. Source inspection confirms the
-full-table reload. It also confirms missing Brain feedback, unbounded read
-receipts, explicit-only hydration, loose receipt requirements, and task-keyed
-audit authorization. None of these are claimed fixed here.
+The earlier circular-import and path-prefix fixes remain covered by fresh
+interpreter imports and gate/executor regressions.
 
-Suffix truncation remains outside an unanchored hash chain's guarantees. The
-README and design document now state this beside the tamper-evidence claim.
-Implementing external anchoring would require an explicit independent trust
-boundary, not another value stored in the same modifiable database.
+## SQLite measurements
+
+Same fixed payload, Python 3.12.14, SQLite 3.53.1, WAL journal, FULL synchronous
+mode, temporary local databases. Each cell is one timing run; verification is
+performed after the timed appends. These measurements do not establish physical
+power-loss durability of the execution environment or production throughput.
+
+| Appends | Before incremental loading | After incremental loading |
+|---:|---:|---:|
+| 500 | 0.920 s | 0.026 s |
+| 1,000 | 3.580 s | 0.047 s |
+| 2,000 | 14.454 s | 0.078 s |
+
+Raw results: `evaluation/results/sqlite-before.json` and `sqlite-after.json`.
+The before source is local commit `ac05117`, identical in content to GitHub
+commit `ded3e5e`; the after source is this patch. `evaluation/sqlite_scaling.py`
+reproduces the workload. A separate regression verifies appends do not repeatedly
+decode historical records, without relying on timing thresholds.
+
+The shared nine-case comparison still passes 9/9, and the real process-crash
+experiment still passes 4/4. These remain deliberately limited experiments.
+
+## Compatibility and remaining limits
+
+See [amendment A2](correctness-contract-a2.md) for API and schema migration.
+Existing schema-1 records are not rewritten, redacted, or falsely certified as
+schema 2. They may contain historical full read content. A digest receipt cannot
+reconstruct omitted text, and a later Brain proposal may itself quote observed
+text into logged arguments or justification. These changes bound the direct read
+result path; they are not a general information-flow or retention policy.
+
+Custom Brains must accept the observations keyword. Tool output is untrusted.
+Indeterminate effects still stop execution; task resumption and reconciliation
+are not implemented. Native Windows, a real LLM, and production-scale concurrent
+workloads were not evaluated. External anchoring, hostile-host isolation, and
+hard-link provenance remain outside the contract.
+
+Incremental loading assumes normal append-only writers. Explicit verification
+rereads historical database rows, but cannot detect valid suffix removal or whole
+log replacement without an independent anchor. Task registration and explicit
+verification still scan history. Automatic startup hydration is a full rebuild;
+multiple already-running MemoryCore instances still require explicit refresh to
+see each other's new memory projections.

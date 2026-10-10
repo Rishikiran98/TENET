@@ -23,6 +23,7 @@ policy ``action.blocked``.
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 
 from ..contracts import ToolExecutionError
 from ..constraints import check_constraints, logical_parts, ConstraintViolation
@@ -60,6 +61,10 @@ class SandboxedFs:
         candidate = candidate.resolve()
         if not candidate.is_relative_to(self._root):
             raise SandboxViolation(f"path {path_str!r} escapes the sandbox (jail)")
+        if 'path_prefix' in constraints:
+            prefix = self._root.joinpath(*logical_parts(constraints['path_prefix'], prefix=True)).resolve()
+            if not candidate.is_relative_to(prefix):
+                raise SandboxViolation('resolved path outside granted prefix')
         return candidate
 
 
@@ -70,18 +75,39 @@ def _require_path(args: dict) -> str:
     return path
 
 
+def _validate(tool, args, constraints):
+    try:
+        check_constraints(tool, args, constraints)
+    except ConstraintViolation as exc:
+        raise SandboxViolation(str(exc)) from exc
+
+
 class FsRead:
     name = "fs.read"
+    MAX_BYTES = 4096
 
     def __init__(self, fs: SandboxedFs) -> None:
         self._fs = fs
 
     def execute(self, args: dict, constraints: dict) -> dict:
-        target = self._fs.resolve(_require_path(args), constraints)
+        _validate(self.name, args, constraints)
+        target = self._fs.resolve(args['path'], constraints)
         if not target.is_file():
             raise ToolExecutionError(f"no such file: {args['path']!r}")
         try:
-            return {"path": args["path"], "content": target.read_text("utf-8")}
+            with target.open('rb') as stream:
+                data = stream.read(self.MAX_BYTES + 1)
+            prefix = data[:self.MAX_BYTES]
+            try:
+                content = prefix.decode('utf-8')
+            except UnicodeDecodeError as exc:
+                if exc.reason != 'unexpected end of data' or len(data) <= self.MAX_BYTES:
+                    raise
+                content = prefix[:exc.start].decode('utf-8')
+            returned = content.encode('utf-8')
+            return {'path':args['path'], 'content':content,
+                    'content_sha256':hashlib.sha256(returned).hexdigest(),
+                    'bytes_returned':len(returned), 'truncated':len(data) > len(returned)}
         except (OSError, UnicodeError) as exc:
             raise ToolExecutionError(str(exc)) from exc
 
@@ -93,6 +119,7 @@ class FsWrite:
         self._fs = fs
 
     def execute(self, args: dict, constraints: dict) -> dict:
+        _validate(self.name, args, constraints)
         content = args.get("content")
         if not isinstance(content, str):
             raise ToolExecutionError("fs.write args must include string 'content'")
@@ -118,6 +145,7 @@ class FsDelete:
         self._fs = fs
 
     def execute(self, args: dict, constraints: dict) -> dict:
+        _validate(self.name, args, constraints)
         target = self._fs.resolve(_require_path(args), constraints)
         if not target.is_file():
             raise ToolExecutionError(f"no such file: {args['path']!r}")

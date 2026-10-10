@@ -9,11 +9,17 @@ build order — lives in [CLAUDE.md](CLAUDE.md). Read it before changing anythin
 
 ## Correctness repair and comparison
 
-The [A1 correctness contract](docs/correctness-contract.md) supersedes conflicting
+The [A1 contract](docs/correctness-contract.md) and
+[A2 interface/schema amendment](docs/correctness-contract-a2.md) supersede conflicting
 prototype guarantees in the original design. The repair includes immutable
 records, single-use task/grant claims, bound approvals, dispatch expiry checks,
 symlink rejection, ingestion retry keys, atomic projection rebuilds, and an
-optional `SQLiteEventLog` for durability. In-memory logs remain process-local.
+optional `SQLiteEventLog` for durability. Version 0.3.0 adds proposal-causal audits,
+strict receipts and filesystem arguments, bounded Brain observations, incremental
+SQLite loading, and automatic hydration on reopen. In-memory logs remain process-local.
+
+Current validation and API migration notes are in
+[review follow-up](docs/review-follow-up.md).
 
 See [measured results and limitations](docs/correctness-results.md) and
 [evaluation reproduction instructions](evaluation/README.md). This is a bounded
@@ -60,7 +66,7 @@ folded from that log. Nothing is authoritative except the log.
   unmatched⇒DENY. Ships the `Gate`/`Policy` protocols and `Verdict`/
   `GateDecision`; the policy *rules* are authored separately (describe-first).
 - **Agent loop + approver** (`src/tenet/agent/`, `src/tenet/approver/`) — the
-  deterministic `ScriptedBrain` (LLM-swappable), and `AgentLoop`: task →
+  deterministic `ScriptedBrain` (observation-aware protocol), and `AgentLoop`: task →
   retrieve (as data) → propose → gate → approve/execute/block, every hop an
   event with an intact why-chain. Escalations fail closed; the approval surface
   labels agent-provided arguments and justification as untrusted, since they

@@ -1,5 +1,8 @@
 # Correctness contract, amendment A1
 
+Extended by [amendment A2](correctness-contract-a2.md), which governs current
+argument schemas, receipts, Brain feedback, read data, and storage hydration.
+
 This amendment implements the October 2026 correctness action plan and takes
 precedence over earlier guarantees in CLAUDE.md. The principal, policy code,
 Python process and host remain trusted. Brain outputs and retrieved text do not

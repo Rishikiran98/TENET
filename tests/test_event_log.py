@@ -126,12 +126,13 @@ def test_replay_folds_deterministically_and_rebuild_verifies():
     log.append(
         namespace="proj", actor=AGENT, event_type=T.AGENT_ACTION_PROPOSED,
         payload={"tool": "fs.read", "args": {"path": "notes.md"},
-                 "justification": "task asks for it", "cited_context_ids": []},
+                 "justification": "task asks for it", "cited_context_ids": [], "proposal_digest":"a"*64},
         correlation_id="task-1",
     )
     log.append(
         namespace="proj", actor=GATE, event_type=T.GATE_VERDICT_ISSUED,
-        payload={"verdict": "allow", "policy_version": "v1",
+        payload={"proposal_ref":"fixture", "phase":"initial",
+                 "verdict": "allow", "policy_version": "v1",
                  "matched_rule_ids": ["r1"], "rationale": "within grant"},
         correlation_id="task-1",
     )

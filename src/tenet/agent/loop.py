@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Protocol, runtime_checkable
 
 from ..approver import ApprovalSurface, Approver
@@ -11,8 +12,9 @@ from ..gate import Gate, GateDecision, Policy, Verdict
 from ..memory import MemoryCore
 from ..scope import ScopeGrant, ToolGrant
 from .brain import Brain
-from ..contracts import Proposal, ToolExecutionError
-from ..values import digest
+from ..contracts import Proposal, ToolExecutionError, Observation
+from ..values import digest, freeze
+import hashlib
 
 
 class AuditWriteError(RuntimeError):
@@ -35,7 +37,8 @@ class Executor(Protocol):
 class StepOutcome:
     proposal: Proposal
     decision: GateDecision
-    outcome_event_type: str      # action.executed | action.failed | action.blocked
+    outcome_event_type: str
+    observation: Observation
 
 
 @dataclass
@@ -105,8 +108,9 @@ class AgentLoop:
                            'transform_version': r.record.contextualizer_version}
                           for r in context]}, corr, initiated.event_id)
         cause, actions_used = retrieval.event_id, 0
+        observations = []
         for _ in range(self._max_steps):
-            proposal = brain.propose(task, context)
+            proposal = brain.propose(task, context, observations=tuple(observations))
             if proposal is None:
                 result.completed, result.reason = True, 'brain signalled done'
                 self._emit(namespace, self._agent, T.TASK_COMPLETED,
@@ -123,7 +127,7 @@ class AgentLoop:
             else:
                 decision = self._gate.evaluate(proposal, grant, self._policy,
                                               now=self._clock(), actions_used=actions_used)
-            verdict = self._verdict(namespace, corr, proposed.event_id, decision, policy_version)
+            verdict = self._verdict(namespace, corr, proposed.event_id, decision, policy_version, proposed.event_id, 'initial')
             cause = verdict.event_id
             authorized = decision.verdict is Verdict.ALLOW
             surface, approval = None, None
@@ -139,7 +143,7 @@ class AgentLoop:
                 approval = self._approver.decide(surface)
                 authorized = approval.approved and approval.binding == surface.binding
                 decided = self._emit(namespace, Actor('approver', approval.approver_id), T.APPROVAL_DECIDED,
-                    {'decision': 'approve' if authorized else 'reject',
+                    {'proposal_ref': proposed.event_id, 'decision': 'approve' if authorized else 'reject',
                      'approver_id': approval.approver_id, 'note': approval.note,
                      'binding': approval.binding, 'binding_valid': approval.binding == surface.binding},
                     corr, requested.event_id)
@@ -158,17 +162,25 @@ class AgentLoop:
                 )
                 if not authorized:
                     final = GateDecision(Verdict.DENY, (), 'dispatch authorization changed or expired')
-                verdict = self._verdict(namespace, corr, cause, final, self._policy.version)
+                verdict = self._verdict(namespace, corr, cause, final, self._policy.version, proposed.event_id, 'dispatch')
                 cause, decision = verdict.event_id, final
             if authorized:
-                cause, outcome = self._execute(namespace, proposal, grant, corr, cause,
+                cause, outcome, data, error = self._execute(namespace, proposal, grant, corr, cause,
                                                proposed.event_id, dispatch_time)
                 actions_used += 1
             else:
                 blocked = self._emit(namespace, Actor('system', 'loop'), T.ACTION_BLOCKED,
                     {'proposal_ref': proposed.event_id, 'verdict_ref': verdict.event_id}, corr, cause)
                 cause, outcome = blocked.event_id, T.ACTION_BLOCKED
-            result.steps.append(StepOutcome(proposal, decision, outcome))
+                data, error = None, None
+            rationale = decision.rationale
+            if outcome == T.ACTION_BLOCKED and approval is not None and not (
+                approval.approved and approval.binding == surface.binding
+            ):
+                rationale = 'approval rejected or binding invalid'
+            observation = Observation(proposal, cause, outcome, data, error, rationale)
+            observations.append(observation)
+            result.steps.append(StepOutcome(proposal, decision, outcome, observation))
             if outcome == T.ACTION_INDETERMINATE:
                 result.reason = 'tool outcome indeterminate; automatic continuation prohibited'
                 break
@@ -178,9 +190,10 @@ class AgentLoop:
                    {'reason': result.reason, 'actions_used': actions_used}, corr, cause)
         return result
 
-    def _verdict(self, namespace, corr, cause, decision, policy_version):
+    def _verdict(self, namespace, corr, cause, decision, policy_version, proposal_ref, phase):
         return self._emit(namespace, Actor('gate', 'gate'), T.GATE_VERDICT_ISSUED,
-            {'verdict': decision.verdict.value, 'policy_version': policy_version,
+            {'proposal_ref': proposal_ref, 'phase': phase,
+             'verdict': decision.verdict.value, 'policy_version': policy_version,
              'matched_rule_ids': decision.matched_rule_ids, 'rationale': decision.rationale}, corr, cause)
 
     def _execute(self, namespace, proposal, grant, corr, cause, operation_id, dispatch_time):
@@ -188,19 +201,41 @@ class AgentLoop:
                    'grant_id': grant.grant_id, 'accepted_at': dispatch_time.isoformat()}
         dispatched = self._emit(namespace, Actor('system', 'loop'), T.ACTION_DISPATCHED,
                                 payload, corr, cause)
+        observation, error = None, None
         try:
             observation = self._executor.execute(proposal, grant.tool_grant(proposal.tool))
-            payload = {**payload, 'result': observation, 'exit_status': 'ok'}
+            if not isinstance(observation, Mapping):
+                raise TypeError("executor result must be a mapping")
+            observation = freeze(observation)
+            receipt_result = observation
+            if proposal.tool == 'fs.read' and isinstance(observation.get('content'), str):
+                # Bound even custom executors and never persist file text.
+                original = observation['content'].encode('utf-8')
+                prefix = original[:4096].decode('utf-8', errors='ignore')
+                encoded = prefix.encode('utf-8')
+                observation = freeze({'path':proposal.args['path'], 'content':prefix,
+                    'content_sha256':hashlib.sha256(encoded).hexdigest(),
+                    'bytes_returned':len(encoded),
+                    'truncated':bool(observation.get('truncated')) or len(encoded) < len(original)})
+                receipt_result = {k:v for k,v in observation.items() if k != 'content'}
+            elif proposal.tool == 'fs.read':
+                # An arbitrary custom result is not safe to retain as a read receipt.
+                receipt_result = {'result_digest':digest(observation)}
+            payload = {**payload, 'result': receipt_result, 'exit_status': 'ok'}
             outcome = T.ACTION_EXECUTED
         except ToolExecutionError as exc:
+            observation = None
             outcome = T.ACTION_INDETERMINATE if exc.outcome_unknown else T.ACTION_FAILED
-            payload = {**payload, 'error': str(exc)}
+            error = str(exc)
+            payload = {**payload, 'error': error}
         except Exception as exc:
+            observation = None
             outcome = T.ACTION_INDETERMINATE
-            payload = {**payload, 'error': f'{type(exc).__name__}: {exc}'}
+            error = f'{type(exc).__name__}: {exc}'
+            payload = {**payload, 'error': error}
         try:
             receipt = self._emit(namespace, Actor('tool', proposal.tool), outcome,
                                  payload, corr, dispatched.event_id)
         except Exception as exc:
             raise AuditWriteError(operation_id) from exc
-        return receipt.event_id, outcome
+        return receipt.event_id, outcome, observation, error
