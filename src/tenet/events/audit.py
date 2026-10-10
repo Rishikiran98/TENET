@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from . import taxonomy as T
 from ..values import digest
+from ..constraints import check_constraints, ConstraintViolation
 
 
 @dataclass(frozen=True)
@@ -69,8 +70,15 @@ def audit_trace(log) -> TraceAudit:
             counts[task] += 1
             if counts[task] > g['max_actions'] or p['grant_id'] != g['grant_id']:
                 issues.append(f'{op}: grant or budget violation')
-            if proposal.payload['tool'] not in {t['tool'] for t in g['tools']}:
+            tool_grant = next((t for t in g['tools'] if t['tool'] == proposal.payload['tool']), None)
+            if tool_grant is None:
                 issues.append(f'{op}: tool outside grant')
+            else:
+                try:
+                    check_constraints(proposal.payload['tool'], proposal.payload['args'],
+                                      tool_grant.get('constraints', {}))
+                except ConstraintViolation as exc:
+                    issues.append(f'{op}: grant constraint violation: {exc}')
             if p['proposal_digest'] != proposal.payload.get('proposal_digest'):
                 issues.append(f'{op}: dispatch digest mismatch')
             if set(proposal.payload['cited_context_ids']) - retrieved.get(task, set()):

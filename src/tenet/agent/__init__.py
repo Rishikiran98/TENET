@@ -5,8 +5,8 @@ every hop evented."""
 from __future__ import annotations
 
 from .brain import Brain, ScriptedBrain
-from .loop import AgentLoop, Executor, StepOutcome, TaskResult, ToolExecutionError
-from .proposal import Proposal
+from .loop import AgentLoop, Executor, StepOutcome, TaskResult
+from ..contracts import Proposal, ToolExecutionError
 
 __all__ = [
     "Proposal",

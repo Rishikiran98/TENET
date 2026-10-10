@@ -1,9 +1,5 @@
-# Memory core (this slice) needs only numpy.
-numpy>=1.24
+# Install the project using pyproject.toml as the dependency source of truth.
+-e .
 
-# Optional: real semantic embeddings. Swap HashingEmbedder ->
-# SentenceTransformerEmbedder once installed. Pulls in torch (large).
-# sentence-transformers>=2.2
-
-# Dev
-# pytest>=7.0
+# Development: pip install -e ".[dev]"
+# Optional semantic embeddings: pip install -e ".[embeddings]"

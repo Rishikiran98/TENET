@@ -12,7 +12,7 @@ describe-first). The gate consumes a ``Policy``; it does not embed rules.
 
 Evaluation order (D7), fixed:
 
-    1. Grant authority first. Expiry, action budget, and tool membership are
+    1. Grant authority first. Expiry, action budget, tool membership, and constraints are
        grant checks — any failure is DENY *before* policy is consulted.
     2. Policy rules. For an in-grant proposal the policy returns a decision, or
        ``None`` meaning "no rule matched."
@@ -27,7 +27,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
-from ..agent.proposal import Proposal
+from ..contracts import Proposal
+from ..constraints import check_constraints, ConstraintViolation
 from ..scope import ScopeGrant, ToolGrant
 
 
@@ -115,6 +116,11 @@ class DefaultGate:
             return GateDecision(
                 Verdict.DENY, (), f"tool {proposal.tool!r} not in grant (default-deny)"
             )
+
+        try:
+            check_constraints(proposal.tool, proposal.args, tool_grant.constraints)
+        except ConstraintViolation as exc:
+            return GateDecision(Verdict.DENY, (), f"grant constraint violation: {exc}")
 
         # 2. policy rules for an in-grant proposal
         decision = policy.evaluate(proposal, grant, tool_grant)

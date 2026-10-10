@@ -22,24 +22,14 @@ policy ``action.blocked``.
 
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from ..agent.loop import ToolExecutionError
+from ..contracts import ToolExecutionError
+from ..constraints import check_constraints, logical_parts, ConstraintViolation
 
 
 class SandboxViolation(ToolExecutionError):
     """A path tried to leave the sandbox or its granted prefix."""
-
-
-def _logical_parts(path_str: str) -> tuple[str, ...]:
-    """Normalize a logical path to its components. Rejects ``..`` outright —
-    inside the sandbox there is nothing above the root to legitimately name."""
-    parts = [p for p in PurePosixPath(path_str).parts if p not in ("/", ".")]
-    if ".." in parts:
-        raise SandboxViolation(f"path {path_str!r} contains '..' (jail)")
-    if not parts:
-        raise SandboxViolation(f"path {path_str!r} names no file")
-    return tuple(parts)
 
 
 class SandboxedFs:
@@ -54,25 +44,12 @@ class SandboxedFs:
         return self._root
 
     def resolve(self, path_str: str, constraints: dict) -> Path:
-        if set(constraints) - {"path_prefix"}:
-            raise SandboxViolation("unsupported filesystem constraint")
-        if "\x00" in path_str:
-            raise SandboxViolation("null byte in path")
-        parts = _logical_parts(path_str)
-
-        # constraint re-check (defense in depth): component-wise prefix match,
-        # so a prefix of /notes does not authorize /notes2.
-        prefix = constraints.get("path_prefix")
-        if "path_prefix" in constraints:
-            if not isinstance(prefix, str) or not prefix or ".." in PurePosixPath(prefix).parts:
-                raise SandboxViolation("invalid path_prefix")
-            prefix_parts = tuple(
-                p for p in PurePosixPath(prefix).parts if p not in ("/", ".")
-            )
-            if parts[: len(prefix_parts)] != prefix_parts:
-                raise SandboxViolation(
-                    f"path {path_str!r} outside granted prefix {prefix!r}"
-                )
+        try:
+            # All three filesystem tools share the same logical path contract.
+            check_constraints('fs.read', {'path': path_str}, constraints)
+            parts = logical_parts(path_str)
+        except ConstraintViolation as exc:
+            raise SandboxViolation(str(exc)) from exc
 
         # the jail: resolve (follows symlinks) and require the result inside root
         candidate = self._root

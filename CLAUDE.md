@@ -22,50 +22,35 @@ order of §12; do not build ahead of it.
 
 ## 0. Implementation status (what exists in the tree today)
 
-- **Build step 1 — event log — is built** (`src/tenet/events/`): envelope +
-  ULID ids, the closed taxonomy, the append-only hash-chained `InMemoryEventLog`,
-  and `replay`/`rebuild`. Tests in `tests/test_event_log.py`.
-- **Build step 2 — memory core on the log — is built** (`src/tenet/memory/`):
-  `MemoryCore.ingest` appends a `memory.raw.appended` event (source of truth)
-  and folds it into the raw store and the context store. The context store is a
-  *pure projection* (D2, deterministic contextualizer → no events), rebuildable
-  from the log via `rebuild_projections`. Retriever is namespace-filter-first.
-  Runs via `python -m tenet.demo`; tests in `tests/test_memory_core.py`.
-- **Build step 3 — ScopeGrant + retriever scope enforcement — is built**
-  (`src/tenet/scope/`): the `ScopeGrant`/`ToolGrant` capability model, and the
-  retriever's stage-1 grant authorization — retrieval can only ever reach the
-  grant's `namespaces`, and no memory content can widen it. Tests in
-  `tests/test_scope.py`. Per §5 the retriever enforces `namespaces` only; the
-  grant's tools/constraints/`max_actions`/`expires_at` are the gate's to enforce.
-- **Build step 4 — gate contract — is built** (`src/tenet/gate/contract.py`):
-  the pure-function `DefaultGate` (grant check → policy → unmatched⇒DENY, D7),
-  `Verdict`/`GateDecision`, the `Policy` protocol, and the `Proposal` type
-  (`src/tenet/agent/proposal.py`). Tests in `tests/test_gate.py`. Per D8 the
-  policy *content* (`gate/policy.py`) is Sai's to author (describe-first) and is
-  intentionally absent; emitting `gate.verdict.issued` is the loop's job (the
-  gate stays pure) and now lands there.
-- **Build step 5 — agent loop + approver/escalate path — is built**
-  (`src/tenet/agent/brain.py`, `loop.py`; `src/tenet/approver/`): the `Brain`
-  protocol with the deterministic `ScriptedBrain` (D4), the `Approver` protocol
-  with scripted / fail-safe-deny / CLI implementations, and `AgentLoop`, which
-  wires task → retrieve → propose → gate → approve/execute/block → complete with
-  every hop evented and causation-chained. The approval surface is built from
-  the proposal + gate decision only — never memory content (§7, pinned by test).
-  The loop feeds `actions_used` to the gate, which enforces `max_actions`.
-  The `Executor` is a protocol here; the sandboxed fs executor is step 6.
-  Tests in `tests/test_agent_loop.py`.
-- **Build step 6 — executor + sandboxed fs tools — is built**
-  (`src/tenet/executor/`): the closed `ToolRegistry` + `RegistryExecutor`
-  (unknown tool ⇒ execution failure), and `fs.read`/`fs.write`/`fs.delete`
-  jailed to a sandbox root. The path jail rejects `..`, out-of-root resolution,
-  and symlink escapes on the *resolved* path; the ToolGrant's `path_prefix` is
-  re-checked component-wise at the executor even when called directly —
-  defense in depth per §8. Violations surface as `action.failed`, distinct from
-  policy blocks. Tests in `tests/test_executor.py` (including the loop driving
-  the real executor). The `max_actions` circuit breaker was already live via
-  gate + loop (step 5).
-- Everything else in this document (projections, demo) is designed and not
-  yet built.
+- **Events:** immutable envelopes, a closed 15-type taxonomy, synchronized
+  `InMemoryEventLog`, durable `SQLiteEventLog`, replay, and a structural audit
+  in `events/audit.py`. A hash chain cannot detect valid suffix truncation or
+  wholesale replacement without an independently retained anchor.
+- **Memory:** raw ingestion, optional idempotency keys, deterministic context
+  projections, and atomic verified rebuilds. Retrieval enforces namespace and
+  expiry before ranking. An existing durable log currently needs an explicit
+  `rebuild_projections()` after constructing MemoryCore. Automatic hydration and
+  efficient incremental SQLite loading remain open review items.
+- **Contracts:** `Proposal` and `ToolExecutionError` live in neutral
+  `src/tenet/contracts.py`. Existing agent imports remain compatibility aliases.
+- **Gate:** grant checks precede policy. The gate enforces expiry, action budget,
+  tool membership, and logical `path_prefix` constraints through pure validators
+  in `constraints.py`. Unsupported constraints fail closed. It does not inspect
+  the filesystem. Production policy remains Sai's to author under D8.
+- **Agent and approvals:** single-use task/grant claims, bound approval decisions,
+  dispatch-before-effect and outcome receipts, and fail-closed continuation on
+  uncertain effects. Agent-provided approval text is quoted as untrusted data;
+  it can contain relayed memory content. The current Brain protocol lacks outcome
+  feedback and is not yet a sufficient interface for general multi-step LLM work.
+- **Executor:** closed filesystem registry, tool/grant equality checks, repeated
+  logical path checks, real-path containment, and rejection of symlink components.
+  A logical path outside the grant is denied by the default gate as
+  `action.blocked`, without consuming action budget. Filesystem state violations
+  discovered only by the executor remain execution failures.
+- **Evaluation:** the conventional comparison, process-crash experiments, and
+  review regressions are implemented. The original poisoned-memory headline
+  demo and production policy are still pending. See
+  [review follow-up](docs/review-follow-up.md) for outstanding limitations.
 
 ---
 
@@ -161,7 +146,8 @@ class Actor:
 `causation_id` gives you the *why-chain* (verdict caused by proposal caused by
 retrieval caused by task). `prev_hash` makes the log tamper-evident — cheap to
 implement, disproportionately valuable in the security story: any mutation of
-history breaks the chain from that point forward.
+history breaks the chain from that point forward. This does not detect removal
+of a valid suffix or replacement of the whole chain without an external anchor.
 
 ### 3.2 Event taxonomy (closed set for v1)
 
@@ -176,18 +162,18 @@ history breaks the chain from that point forward.
 | `gate.verdict.issued` | gate | verdict (allow/deny/escalate), policy_version, matched_rule_ids, rationale |
 | `approval.requested` | system | proposal ref, rendered approval surface |
 | `approval.decided` | approver | approve/reject, approver id, note |
-| `action.executed` | tool | observation/result, exit status |
+| `action.dispatched` | system | operation ID, proposal digest, grant ID, accepted time |
+| `action.executed` | tool | observation/result, exit status, operation binding |
 | `action.blocked` | system | proposal ref, verdict ref |
-| `action.failed` | tool | error (execution failure ≠ policy block — keep distinct) |
+| `action.failed` | tool | error, operation binding |
+| `action.indeterminate` | tool | uncertain effect, operation binding |
 
 Retrieval **is** logged (`agent.retrieval.performed`). Without it the audit
 trail answers "what did the agent do" but not "what did the agent *see*," and
 the second question is the one that matters in an injection post-mortem.
 
-*Implementation note:* the register calls this the "12-type" taxonomy, counting
-`task.completed` / `task.aborted` as one row; the code enumerates all 13 distinct
-`event_type` strings in `src/tenet/events/taxonomy.py`, which is the closed set
-the log enforces.
+*Implementation note:* amendment A1 adds dispatch and indeterminate receipts.
+There are now 15 distinct event types in `src/tenet/events/taxonomy.py`.
 
 ---
 
@@ -278,9 +264,11 @@ class ScopeGrant:
 1. Authority flows **only** from the grant. Nothing retrieved from memory can
    widen it — retrieved content is data, and data cannot carry capability.
 2. Grants are task-scoped and expire. There is no ambient authority.
-3. The retriever enforces `namespaces`; the gate enforces `tools`,
-   `constraints`, `max_actions`, `expires_at`. Two enforcement points, one
-   grant.
+3. The retriever enforces `namespaces` and `expires_at`. The gate enforces
+   `tools`, supported logical constraints, `max_actions`, and `expires_at`.
+   The executor repeats the logical checks and checks actual filesystem state.
+   Unsupported constraints are denied before policy; real-path and symlink
+   checks require executor I/O and cannot be proved by a pure gate.
 4. Default-deny: a tool absent from the grant is not "unspecified," it is
    forbidden.
 
@@ -348,19 +336,15 @@ task.initiated (user: task + ScopeGrant)
   └► loop or finish      → task.completed | task.aborted
 ```
 
-**Brain (D4, finalized):** a scripted deterministic stub in v1, behind a
-stable `Brain` interface with a real-LLM swap-in path — the same pattern as
-the embedder. Rationale: the headline demo must be reproducible; the security
-claim is *architectural* and cannot depend on Brain quality (the threat model
-already assumes the Brain is foolable); and an API dependency adds nothing to
-what v1 proves. Swapping in a real LLM later strengthens the demo without
-touching the architecture.
+**Brain (D4):** the current scripted stub receives task text and retrieved
+context. It does not receive outcomes, so the interface must be extended before
+claiming general multi-step LLM interchangeability. A typed observation history
+is an open follow-up, including success, blocked, failed, and indeterminate steps.
 
-**Approver:** the protocol from the scaffold stands — CLI, scripted, and
-fail-safe-deny implementations. The approval surface renders the proposal and
-the gate's rationale, **never memory content** (an injection must not be able
-to phrase its own approval request). Approver decisions are logged events like
-everything else.
+**Approver:** CLI, scripted, and fail-safe implementations consume a request
+bound to the proposal occurrence, task, grant, policy version, and expiry.
+Arguments and justification are quoted and labeled untrusted because they can
+relay memory content. These labels do not prevent human persuasion.
 
 **Agent memory writes:** if the agent wants to persist something, that is a
 *gated action* (`memory.write` must appear in the ScopeGrant and pass the
@@ -424,26 +408,28 @@ and corrections-as-new-events (history never edited).
 
 ```
 tenet/
-  events/          envelope.py, taxonomy.py, log.py (append-only + hash chain), replay.py   ◄── BUILT
+  events/          envelope.py, taxonomy.py, log.py, sqlite.py, replay.py, audit.py   ◄── BUILT
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
-  agent/           proposal.py, brain.py (stub + LLM interface), loop.py   ◄── BUILT
+  contracts.py     Proposal, ToolExecutionError
+  constraints.py   pure logical constraint validators
+  agent/           proposal.py (compatibility alias), brain.py (scripted), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
   executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
   projections/     audit.py, steps.py
   demo/            naive_agent.py, tenet_agent.py, poisoned_corpus/
 ```
 
-*Current tree:* the event log lives at `src/tenet/events/` and the memory
-subsystem at `src/tenet/memory/`. The old pre-refactor seed that lived at the
-top of `src/tenet/` has been removed — step 2 moved it under `memory/` and put
-it on the log. `ScopeGrant` lives at `src/tenet/scope/`, the gate contract at `src/tenet/gate/`, and the `Proposal` DTO at `src/tenet/agent/`. The gate's `policy.py` (Sai), the projections, and the demo are still to come.
+*Current tree:* memory, event logs, scope, gate, agent, approver, and executor
+are implemented under `src/tenet/`. Neutral contracts live in `contracts.py`.
+The structural audit lives in `events/audit.py`; a richer audit presentation and
+the original headline demo remain pending. Policy content is still Sai's.
 
-Storage: in-memory implementations of `RawStore`/`ContextStore`/event log
-first. Postgres lands later as: `events` table (jsonb payload, ULID PK, hash
-columns) + `context` table with a pgvector column; FastAPI after that. Neither
-touches the interfaces above.
+Storage: raw and context projections are in memory. The authoritative log can be
+in memory or SQLite. SQLite currently reloads the full table on transactions,
+which makes repeated appends quadratic; incremental loading is an open follow-up.
+Postgres, pgvector, and FastAPI are not implemented.
 
 ---
 
@@ -486,7 +472,7 @@ Each is deferred with rationale, not forgotten.
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Event envelope + closed 12-type taxonomy, hash-chained | **Finalized** |
+| D1 | Event envelope + closed taxonomy (15 types after A1), hash-chained | **Finalized** |
 | D2 | Deterministic transforms are projections; non-deterministic are events | **Finalized** |
 | D3 | ScopeGrant capability model; authority never from memory; default-deny | **Finalized** |
 | D4 | Brain = deterministic stub in v1 behind stable LLM-swappable interface | **Finalized** |
