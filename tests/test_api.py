@@ -128,3 +128,34 @@ def test_demo_factory(monkeypatch):
     response = client.post("/tasks", headers=AUTH, json={
         "task": "summarize the project notes", "namespace": NAMESPACE, "grant": READ_PROJECT})
     assert [s["verdict"] for s in response.json()["steps"]] == ["allow", "deny"]
+
+
+def test_non_utf8_strings_are_422_not_500(tmp_path):
+    client, memory, _ = _client(tmp_path)
+    before = len(memory.log)
+    headers = {**AUTH, "content-type": "application/json"}
+    ingest = '{"content": "bad \\ud800", "namespace": "n", "source": "s"}'
+    task = ('{"task": "bad \\ud800", "namespace": "n", "grant": '
+            '{"namespaces": ["n"], "max_actions": 1, "ttl_seconds": 60}}')
+    assert client.post("/memory", content=ingest, headers=headers).status_code == 422
+    assert client.post("/tasks", content=task, headers=headers).status_code == 422
+    assert len(memory.log) == before
+
+
+def test_tampered_log_is_reported_not_crashed(tmp_path):
+    import dataclasses
+    client, memory, _ = _client(tmp_path)
+    memory.log._events[0] = dataclasses.replace(memory.log._events[0], namespace="evil")
+    response = client.get("/audit", headers=AUTH)
+    assert response.status_code == 409
+    assert response.json()["chain_verified"] is False
+
+
+def test_non_utf8_constraint_values_are_422(tmp_path):
+    client, memory, _ = _client(tmp_path)
+    before = len(memory.log)
+    task = ('{"task": "x", "namespace": "n", "grant": {"namespaces": ["n"], "max_actions": 1,'
+            ' "ttl_seconds": 60, "tools": [{"tool": "fs.read", "constraints": {"path_prefix": "\\ud800"}}]}}')
+    response = client.post("/tasks", content=task, headers={**AUTH, "content-type": "application/json"})
+    assert response.status_code == 422
+    assert len(memory.log) == before

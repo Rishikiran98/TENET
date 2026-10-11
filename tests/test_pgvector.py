@@ -158,3 +158,10 @@ def test_headline_demo_blocks_with_pgvector_memory(make_store, tmp_path):
     assert (root / SECRET).exists()
     assert [s.proposal.tool for s in result.steps] == ["fs.read", "fs.delete"]
     assert audit_trace(memory.log).issues == ()
+
+
+def test_stale_table_is_cleared_for_an_empty_log(make_store):
+    store = make_store()
+    _cores(store)
+    fresh = MemoryCore(HashingEmbedder(dim=DIM), context_store=make_store(table=store.table))
+    assert fresh.retrieve("deploy", _grant("alpha", "beta")) == []

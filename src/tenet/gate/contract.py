@@ -50,11 +50,12 @@ class GateDecision:
     def __post_init__(self):
         if not isinstance(self.verdict, Verdict):
             raise ValueError("invalid verdict")
-        if isinstance(self.matched_rule_ids, str) or any(
-            not isinstance(rule, str) for rule in self.matched_rule_ids
-        ):
+        if isinstance(self.matched_rule_ids, str):
             raise ValueError("rule IDs must be a sequence of strings")
+        # Materialize first: validating a generator would consume it.
         object.__setattr__(self, 'matched_rule_ids', tuple(self.matched_rule_ids))
+        if any(not isinstance(rule, str) for rule in self.matched_rule_ids):
+            raise ValueError("rule IDs must be a sequence of strings")
 
     @property
     def allowed(self) -> bool:

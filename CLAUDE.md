@@ -23,7 +23,7 @@ order of §12; do not build ahead of it.
 
 ## 0. Implementation status (what exists in the tree today)
 
-- **Events:** immutable envelopes, a closed 15-type taxonomy, synchronized
+- **Events:** immutable envelopes, a closed 16-type taxonomy, synchronized
   `InMemoryEventLog`, durable `SQLiteEventLog`, replay, and a structural audit
   in `events/audit.py`. A hash chain cannot detect valid suffix truncation or
   wholesale replacement without an independently retained anchor.
@@ -171,13 +171,15 @@ of a valid suffix or replacement of the whole chain without an external anchor.
 | `action.blocked` | system | proposal ref, verdict ref |
 | `action.failed` | tool | error, operation binding |
 | `action.indeterminate` | tool | uncertain effect, operation binding |
+| `action.reconciled` | system | operation binding, journal store identity, applied/cancelled evidence |
 
 Retrieval **is** logged (`agent.retrieval.performed`). Without it the audit
 trail answers "what did the agent do" but not "what did the agent *see*," and
 the second question is the one that matters in an injection post-mortem.
 
-*Implementation note:* amendment A1 adds dispatch and indeterminate receipts.
-There are now 15 distinct event types in `src/tenet/events/taxonomy.py`.
+*Implementation note:* amendment A1 adds dispatch and indeterminate receipts;
+amendment A3 adds journal reconciliation. There are now 16 distinct event types
+in `src/tenet/events/taxonomy.py`.
 
 ---
 
@@ -499,7 +501,7 @@ Each is deferred with rationale, not forgotten.
 
 | # | Decision | Status |
 |---|---|---|
-| D1 | Event envelope + closed taxonomy (15 types after A1), hash-chained | **Finalized** |
+| D1 | Event envelope + closed taxonomy (16 types after A1 and A3), hash-chained | **Finalized** |
 | D2 | Deterministic transforms are projections; non-deterministic are events | **Finalized** |
 | D3 | ScopeGrant capability model; authority never from memory; default-deny | **Finalized** |
 | D4 | Brain = deterministic stub in v1 behind stable LLM-swappable interface | **Finalized** |
