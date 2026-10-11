@@ -6,7 +6,7 @@ else. A closed taxonomy is what makes the audit trail legible: every fold in
 an unknown type is rejected at the boundary rather than discovered three
 projections downstream.
 
-Amendment A1 adds dispatch and indeterminate outcomes, for 15 event types.
+Amendment A3 adds journal reconciliation, for 16 event types.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ ACTION_BLOCKED = "action.blocked"
 ACTION_FAILED = "action.failed"
 ACTION_DISPATCHED = 'action.dispatched'
 ACTION_INDETERMINATE = 'action.indeterminate'
+ACTION_RECONCILED = 'action.reconciled'
 
 # event_type -> payload keys that MUST be present. This keeps the closed
 # taxonomy meaningful: a known type carrying a malformed payload is rejected at
@@ -58,6 +59,8 @@ REQUIRED_PAYLOAD_KEYS: dict[str, frozenset[str]] = {
     ACTION_FAILED: frozenset({"error"}),
     ACTION_DISPATCHED: frozenset({'operation_id', 'proposal_digest', 'grant_id'}),
     ACTION_INDETERMINATE: frozenset({'error', 'operation_id'}),
+    ACTION_RECONCILED: frozenset({'operation_id', 'proposal_digest', 'grant_id',
+                                'executor_id', 'state', 'evidence'}),
 }
 
 # The closed set. Membership is derived from the required-keys map so the two
@@ -69,7 +72,7 @@ def is_known(event_type: str) -> bool:
     return event_type in TAXONOMY
 
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 V2_REQUIRED = {
     AGENT_ACTION_PROPOSED: {'proposal_digest'},
     GATE_VERDICT_ISSUED: {'proposal_ref', 'phase'},
@@ -91,9 +94,11 @@ def validate_payload(event_type: str, payload: dict, schema_version=CURRENT_SCHE
         )
     if not isinstance(payload, Mapping):
         raise ValueError(f"{event_type} payload must be a dict, got {type(payload).__name__}")
-    if type(schema_version) is not int or schema_version not in {1, CURRENT_SCHEMA_VERSION}:
+    if type(schema_version) is not int or schema_version not in {1, 2, 3}:
         raise ValueError('unsupported schema_version')
-    required = REQUIRED_PAYLOAD_KEYS[event_type] | (V2_REQUIRED.get(event_type, set()) if schema_version == 2 else set())
+    if event_type == ACTION_RECONCILED and schema_version < 3:
+        raise ValueError('reconciliation requires schema 3')
+    required = REQUIRED_PAYLOAD_KEYS[event_type] | (V2_REQUIRED.get(event_type, set()) if schema_version >= 2 else set())
     missing = required - payload.keys()
     if missing:
         raise ValueError(
@@ -104,7 +109,7 @@ def validate_payload(event_type: str, payload: dict, schema_version=CURRENT_SCHE
                    'query', 'tool', 'justification', 'verdict', 'policy_version',
                    'rationale', 'proposal_ref', 'verdict_ref', 'decision',
                    'approver_id', 'error', 'operation_id', 'proposal_digest', 'grant_id',
-                   'binding', 'accepted_at', 'phase'}
+                   'binding', 'accepted_at', 'phase', 'executor_id', 'state'}
     for key in required & string_keys:
         if not isinstance(payload[key], str):
             raise ValueError(f'{key} must be a string')
@@ -120,7 +125,7 @@ def validate_payload(event_type: str, payload: dict, schema_version=CURRENT_SCHE
     if event_type == APPROVAL_DECIDED and payload['decision'] not in {'approve', 'reject'}:
         raise ValueError('invalid approval decision')
 
-    if schema_version == 2:
+    if schema_version >= 2:
         for key in ('operation_id', 'grant_id', 'proposal_ref'):
             if key in required and not payload[key]:
                 raise ValueError(f'{key} must not be empty')
@@ -141,3 +146,8 @@ def validate_payload(event_type: str, payload: dict, schema_version=CURRENT_SCHE
                     raise ValueError('timezone required')
             except ValueError as exc:
                 raise ValueError('accepted_at must be an aware ISO timestamp') from exc
+    if event_type == ACTION_RECONCILED:
+        if payload['state'] not in {'applied', 'cancelled'} or not payload['executor_id']:
+            raise ValueError('invalid reconciliation state or executor identity')
+        if not isinstance(payload['evidence'], Mapping):
+            raise ValueError('reconciliation evidence must be a mapping')

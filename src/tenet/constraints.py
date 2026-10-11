@@ -5,6 +5,7 @@ sandbox; a leading slash names that sandbox, not the host filesystem. Real-path
 resolution and symlink checks remain the executor's responsibility.
 """
 from pathlib import PurePosixPath
+import re
 
 FILESYSTEM_TOOLS = frozenset({'fs.read', 'fs.write', 'fs.delete'})
 
@@ -33,6 +34,20 @@ def check_constraints(tool, args, constraints):
     their own complete validator instead of inheriting a single-path schema.
     Backslashes and colons are forbidden to preserve POSIX semantics on Windows.
     """
+    if tool == 'journal.append':
+        if set(args) != {'journal', 'content'} or set(constraints) != {'journal'}:
+            raise ConstraintViolation('journal append requires exact arguments and journal constraint')
+        name = args['journal']
+        if not isinstance(name, str) or re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name) is None:
+            raise ConstraintViolation('invalid journal name')
+        if name != constraints['journal']:
+            raise ConstraintViolation('journal outside grant')
+        try:
+            if not isinstance(args['content'], str) or len(args['content'].encode('utf-8')) > 4096:
+                raise ConstraintViolation('journal content must be UTF-8 text of at most 4096 bytes')
+        except UnicodeError as exc:
+            raise ConstraintViolation('invalid journal UTF-8') from exc
+        return
     if tool not in FILESYSTEM_TOOLS:
         if tool.startswith('fs.'):
             raise ConstraintViolation('unregistered filesystem tool schema')
