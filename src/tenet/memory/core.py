@@ -61,6 +61,7 @@ class MemoryCore:
             if contextualizer is not None
             else ChunkEmbedContextualizer(embedder)
         )
+        self._owns_context = False  # True once the store is a replacement made here
         self._retriever = Retriever(self._context, embedder)
         self._embedder = embedder
         self._lock = RLock()
@@ -110,19 +111,33 @@ class MemoryCore:
         """Verify and build private replacements before publishing either store.
 
         Store adapters must provide empty() to create an unpublished projection.
-        Existing external references to stores continue to see the old snapshot.
+        An adapter whose replacement lives outside this process (pgvector) may
+        also provide publish() and discard(); publish runs only after the whole
+        rebuild succeeded, discard on any failure. In-memory stores keep the old
+        snapshot for existing external references; a shared database does not.
         """
         with self._lock, self._log.transaction():
             self._log.verify()
             raw_store, context_store = self._raw.empty(), self._context.empty()
-            for event in self._log:
-                if event.event_type == MEMORY_RAW_APPENDED:
-                    raw = _raw_from_event(event)
-                    contexts = list(self._contextualizer.contextualize(raw))
-                    raw_store.add(raw)
-                    for ctx in contexts:
-                        context_store.upsert(ctx)
+            try:
+                for event in self._log:
+                    if event.event_type == MEMORY_RAW_APPENDED:
+                        raw = _raw_from_event(event)
+                        contexts = list(self._contextualizer.contextualize(raw))
+                        raw_store.add(raw)
+                        for ctx in contexts:
+                            context_store.upsert(ctx)
+                if hasattr(context_store, "publish"):
+                    context_store.publish()
+            except BaseException:
+                if hasattr(context_store, "discard"):
+                    context_store.discard()
+                raise
+            previous, owned = self._context, self._owns_context
             self._raw, self._context = raw_store, context_store
+            self._owns_context = True
+            if owned and hasattr(previous, "close"):
+                previous.close()  # a replacement this core created; nobody else holds it
             self._retriever = Retriever(self._context, self._embedder)
 
     def retrieve(

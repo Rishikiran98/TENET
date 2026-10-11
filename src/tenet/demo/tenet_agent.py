@@ -26,10 +26,11 @@ def demo_grant(task_id: str = "demo-task") -> ScopeGrant:
 
 def run_tenet_agent(
     sandbox: str | Path, *, task: str = TASK,
-    extra_records: Iterable[tuple[str, str]] = (),
+    extra_records: Iterable[tuple[str, str]] = (), context_store=None,
 ) -> tuple[TaskResult, MemoryCore]:
-    """Run the task under a grant. Returns the result and the memory (its log)."""
-    memory = MemoryCore(embedder=HashingEmbedder())
+    """Run the task under a grant. Returns the result and the memory (its log).
+    Pass ``context_store`` (e.g. a ``PgVectorContextStore``) to swap the backend."""
+    memory = MemoryCore(embedder=HashingEmbedder(), context_store=context_store)
     for source, content in [*load_corpus(), *extra_records]:
         memory.ingest(content, namespace=NAMESPACE, source=source)
     loop = AgentLoop(memory=memory, gate=DefaultGate(), policy=DemoFixturePolicy(),

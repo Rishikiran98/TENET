@@ -21,10 +21,10 @@ dependencies = [
 embeddings = [
     "sentence-transformers>=2.5",
 ]
-# Production store path: Postgres + pgvector (a later slice).
+# Context projection on Postgres + pgvector (memory/pgvector.py). The server
+# needs the `vector` extension; vectors are sent as text, so no client plugin.
 postgres = [
-    "psycopg[binary,pool]>=3.1",
-    "pgvector>=0.2.5",
+    "psycopg[binary]>=3.1",
 ]
 # HTTP surface (a later slice).
 api = [
