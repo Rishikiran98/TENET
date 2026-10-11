@@ -153,3 +153,41 @@ def test_explicit_approver_opts_out_of_http_approvals(tmp_path):
     client, memory, target = make(tmp_path, approver=FailSafeDenyApprover())
     state = run_task(client, TASK)
     assert state["steps"][0]["outcome"] == T.ACTION_BLOCKED and target.exists()
+
+
+def _read_app(tmp_path, **kwargs):
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes" / "a.txt").write_text("TOP-SECRET-READ-TEXT")
+    memory = MemoryCore(HashingEmbedder())
+
+    class AllowReads:
+        version = "test/allow-reads"
+
+        def evaluate(self, proposal, grant, tool_grant):
+            return GateDecision(Verdict.ALLOW, ("allow-read",), "reads allowed")
+
+    app = create_app(memory=memory, executor=fs_executor(tmp_path), policy=AllowReads(),
+                     brain_factory=lambda: ScriptedBrain([Proposal("fs.read", {"path": "/notes/a.txt"})]),
+                     token=TOKEN, **kwargs)
+    task = {"task": "read", "namespace": "n",
+            "grant": {"namespaces": ["n"], "max_actions": 1, "ttl_seconds": 600,
+                      "tools": [{"tool": "fs.read", "constraints": {"path_prefix": "/notes"}}]}}
+    return app, TestClient(app), task
+
+
+def test_finished_tasks_keep_no_read_content(tmp_path):
+    app, client, task = _read_app(tmp_path)
+    state = run_task(client, task)
+    assert state["steps"][0]["outcome"] == T.ACTION_EXECUTED
+    record = app.state.tasks.get(state["task_id"])
+    assert not hasattr(record, "result")
+    assert "TOP-SECRET-READ-TEXT" not in repr(record)
+
+
+def test_old_finished_tasks_are_evicted_and_served_from_the_log(tmp_path):
+    app, client, task = _read_app(tmp_path, max_finished_tasks=1)
+    first, second = run_task(client, task), run_task(client, task)
+    assert app.state.tasks.get(first["task_id"]) is None
+    assert app.state.tasks.get(second["task_id"]) is not None
+    evicted = client.get(f"/tasks/{first['task_id']}", headers=AUTH).json()
+    assert evicted["status"] == "completed" and evicted["steps"] == []

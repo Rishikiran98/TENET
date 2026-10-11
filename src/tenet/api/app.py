@@ -124,6 +124,7 @@ def create_app(
     gate: Gate | None = None,
     approval_timeout: float = 300.0,
     max_workers: int = 4,
+    max_finished_tasks: int = 1000,
 ) -> FastAPI:
     """Build the app. ``policy`` is required: production policy is Sai's (D8).
 
@@ -132,9 +133,11 @@ def create_app(
     """
     if not isinstance(token, str) or len(token) < 16:
         raise ValueError("token must be a string of at least 16 characters")
-    if not approval_timeout > 0 or type(max_workers) is not int or max_workers < 1:
-        raise ValueError("approval_timeout must be positive and max_workers at least 1")
-    registry = TaskRegistry()
+    if (not approval_timeout > 0 or type(max_workers) is not int or max_workers < 1 or
+            type(max_finished_tasks) is not int or max_finished_tasks < 0):
+        raise ValueError("approval_timeout must be positive, max_workers at least 1 "
+                         "and max_finished_tasks non-negative")
+    registry = TaskRegistry(max_finished=max_finished_tasks)
     approver = approver or HttpApprover(registry, principal=principal,
                                         approval_timeout=approval_timeout)
     loop = AgentLoop(memory=memory, gate=gate or DefaultGate(), policy=policy,
@@ -159,6 +162,7 @@ def create_app(
 
     app = FastAPI(title="Tenet", version=__version__, dependencies=[Depends(require_principal)],
                   docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.state.tasks = registry  # for operators and tests; holds no read content
 
     @app.exception_handler(RequestValidationError)
     def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -183,6 +187,15 @@ def create_app(
             raise HTTPException(422, str(exc))
         return {"raw_id": raw.raw_id, "content_hash": raw.content_hash}
 
+    def _steps(result) -> list[dict]:
+        return [{
+            "tool": s.proposal.tool, "args": thaw(s.proposal.args),
+            "cited_context_ids": list(s.proposal.cited_context_ids),
+            "verdict": s.decision.verdict.value, "rationale": s.observation.rationale,
+            "outcome": s.outcome_event_type, "result": _summarize(s.observation.result),
+            "error": s.observation.error,
+        } for s in result.steps] if result is not None else []
+
     def run(record: TaskRecord, body: TaskRequest, grant: ScopeGrant) -> None:
         try:
             result = loop.run_task(task=body.task, grant=grant, brain=brain_factory(),
@@ -194,7 +207,9 @@ def create_app(
             registry.finish(record.task_id, status=FAILED,
                             error=f"task aborted: {type(exc).__name__}")
         else:
-            registry.finish(record.task_id, result=result,
+            summary = {"completed": result.completed, "reason": result.reason,
+                       "steps": _steps(result)}   # read text is dropped here
+            registry.finish(record.task_id, summary=summary,
                             status=COMPLETED if result.completed else ABORTED)
 
     @app.post("/tasks", status_code=status.HTTP_202_ACCEPTED)
@@ -212,15 +227,6 @@ def create_app(
         registry.add(record)
         workers.submit(run, record, body, grant)
         return {"task_id": grant.task_id, "grant_id": grant.grant_id, "status": record.status}
-
-    def _steps(result) -> list[dict]:
-        return [{
-            "tool": s.proposal.tool, "args": thaw(s.proposal.args),
-            "cited_context_ids": list(s.proposal.cited_context_ids),
-            "verdict": s.decision.verdict.value, "rationale": s.observation.rationale,
-            "outcome": s.outcome_event_type, "result": _summarize(s.observation.result),
-            "error": s.observation.error,
-        } for s in result.steps] if result is not None else []
 
     def _from_log(task_id: str) -> dict:
         """A task this process is not running (e.g. started before a restart)."""
@@ -246,14 +252,14 @@ def create_app(
             return {**_from_log(task_id), "steps": [], "pending_approval": None}
         with registry.lock:
             pending = record.pending.surface if record.pending else None
-            status_, result = record.status, record.result
+            status_, summary = record.status, record.summary or {}
             error, operation_id = record.error, record.operation_id
         return {
             "task_id": task_id, "grant_id": record.grant_id, "status": status_,
-            "completed": bool(result and result.completed),
-            "reason": result.reason if result else None,
+            "completed": bool(summary.get("completed")),
+            "reason": summary.get("reason"),
             "error": error, "operation_id": operation_id,
-            "steps": _steps(result),
+            "steps": summary.get("steps", []),
             "pending_approval": None if pending is None else {
                 "proposal_ref": pending.proposal_ref, "binding": pending.binding,
                 "tool": pending.tool, "args": thaw(pending.args),

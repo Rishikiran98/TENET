@@ -35,7 +35,9 @@ class TaskRecord:
     task_id: str
     grant_id: str
     status: str = RUNNING
-    result: object = None            # TaskResult once the loop returns
+    # Content-free summary once the loop returns ({completed, reason, steps}).
+    # The TaskResult itself is never kept: its observations hold read text.
+    summary: dict | None = None
     error: str | None = None
     operation_id: str | None = None  # set when an effect may lack its receipt
     pending: PendingApproval | None = None
@@ -44,9 +46,10 @@ class TaskRecord:
 class TaskRegistry:
     """Thread-safe table of the tasks this server process is running."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, max_finished: int = 1000) -> None:
         self.lock = threading.Lock()
-        self._records: dict[str, TaskRecord] = {}
+        self._records: dict[str, TaskRecord] = {}   # insertion-ordered
+        self._max_finished = max_finished
         self.closing = False
 
     def add(self, record: TaskRecord) -> None:
@@ -62,6 +65,11 @@ class TaskRegistry:
             record = self._records[task_id]
             for name, value in changes.items():
                 setattr(record, name, value)
+            # Bound memory: drop the oldest finished records. Their status is
+            # still served from the event log by GET /tasks/{id}.
+            finished = [t for t, r in self._records.items() if r.status in (COMPLETED, ABORTED, FAILED)]
+            for old in finished[:max(0, len(finished) - self._max_finished)]:
+                del self._records[old]
 
     def answer(self, task_id: str, proposal_ref: str, *, approved: bool,
                binding: str, note: str) -> str:

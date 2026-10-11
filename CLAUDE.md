@@ -462,6 +462,8 @@ shutdown, is a deny. The loop, events and audit are unchanged: the decision
 lands in the existing `approval.decided` event. Pending approvals and running
 tasks live in process memory; after a restart such a task reports
 `interrupted` (no effect is uncertain: dispatch follows the decision).
+Finished tasks keep only a content-free summary, and at most
+`max_finished_tasks` (default 1000) are kept; older ones are served from the log.
 Responses omit read file content. Generated docs
 (`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
 cover them.
