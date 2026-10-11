@@ -3,6 +3,7 @@
 This checks recorded authority and relationships. It cannot establish external
 truth, policy correctness, or historical completeness without an external anchor.
 """
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
@@ -201,6 +202,12 @@ def audit_trace(log) -> TraceAudit:
             elif kind in {T.ACTION_EXECUTED, T.ACTION_FAILED, T.ACTION_INDETERMINATE}:
                 op = p.get('operation_id'); dispatch = dispatches.get(op)
                 valid = e.schema_version >= 2
+                if kind == T.ACTION_EXECUTED and not isinstance(p.get('result'), Mapping):
+                    # The taxonomy only requires the key; an unreadable receipt proves nothing.
+                    flag(f'{e.event_id}: execution result is not an object')
+                    valid = False
+                    if op in dispatches:
+                        invalid_operations.add(op)
                 if dispatch is None or related(dispatch.event_id, e) is None:
                     flag(f'{e.event_id}: outcome without matching dispatch')
                     valid = False

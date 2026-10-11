@@ -9,6 +9,7 @@ this view makes no validity claims of its own.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 from ..events import taxonomy as T
@@ -81,8 +82,13 @@ def audit_view(log, task_id: str) -> TaskAudit:
             elif kind in _OUTCOMES and p.get("operation_id") in traces:
                 trace = traces[p["operation_id"]]
                 trace.outcome = kind
-                result = thaw(p.get("result") or {})
-                trace.outcome_detail = (result if isinstance(result, dict) else {}) or {"error": p.get("error")}
+                result = p.get("result")
+                if isinstance(result, Mapping):
+                    trace.outcome_detail = thaw(result)
+                elif kind == T.ACTION_EXECUTED:
+                    raise TypeError("execution result is not an object")  # -> unreadable
+                else:
+                    trace.outcome_detail = {"error": p.get("error")}
             elif kind == T.ACTION_RECONCILED and p.get("operation_id") in traces:
                 traces[p["operation_id"]].reconciliation = {
                     "state": p.get("state"), "executor_id": p.get("executor_id"),
