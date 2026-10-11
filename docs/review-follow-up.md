@@ -3,9 +3,9 @@
 **October 11, 2026 status (0.4.0).** A3 added the transactional journal and
 operator reconciliation, so the reconciliation limit below now applies only to
 ordinary filesystem effects. Later review rounds fixed the issues recorded in
-`tests/test_bugfixes.py`. The suite has 225 tests (213 run without a Postgres
-DSN; 12 need one). The table and measurements below are the 0.3.0 record and
-are kept unchanged.
+`tests/test_bugfixes.py`. Run `pytest` for the current count; the tests in
+`tests/test_pgvector.py` skip unless `TENET_PG_DSN` is set. The table and
+measurements below are the 0.3.0 record and are kept unchanged.
 
 Updated October 10, 2026 for version 0.3.0. The six previously open items and the
 three argument-validation observations are addressed in this patch. The earlier
