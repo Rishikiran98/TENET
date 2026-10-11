@@ -28,6 +28,7 @@ class ProposalTrace:
     approvals: list[dict] = field(default_factory=list)
     outcome: str | None = None
     outcome_detail: dict = field(default_factory=dict)
+    reconciliation: dict | None = None     # operator resolution of an uncertain outcome
 
 
 @dataclass
@@ -79,6 +80,10 @@ def audit_view(log, task_id: str) -> TaskAudit:
             trace = traces[p["operation_id"]]
             trace.outcome = kind
             trace.outcome_detail = thaw(p.get("result") or {}) or {"error": p.get("error")}
+        elif kind == T.ACTION_RECONCILED and p.get("operation_id") in traces:
+            traces[p["operation_id"]].reconciliation = {
+                "state": p.get("state"), "executor_id": p.get("executor_id"),
+                "event_id": e.event_id}
         elif kind in (T.TASK_COMPLETED, T.TASK_ABORTED):
             audit.ending = kind
             audit.ending_reason = p.get("summary") or p.get("reason", "")
@@ -117,5 +122,8 @@ def render_audit(audit: TaskAudit) -> str:
                                        if k in ("path", "bytes_returned", "deleted", "error")},
                                       sort_keys=True)
         lines.append(f"      outcome: {t.outcome or 'none recorded'}{detail}")
+        if t.reconciliation:
+            lines.append(f"      reconciled by operator: {t.reconciliation['state']}"
+                         f" (journal store {t.reconciliation['executor_id']})")
     lines.append(f"  ended: {audit.ending or 'not recorded'} ({audit.ending_reason})")
     return "\n".join(lines)

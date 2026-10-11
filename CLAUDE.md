@@ -49,8 +49,9 @@ order of §12; do not build ahead of it.
   A logical path outside the grant is denied by the default gate as
   `action.blocked`, without consuming action budget. Filesystem state violations
   discovered only by the executor remain execution failures.
-- **Evaluation:** the conventional comparison, process-crash experiments, and
-  review regressions are implemented. The poisoned-memory headline demo
+- **Evaluation:** the conventional comparison, process-crash experiments, the
+  A3 recovery comparison (`evaluation/recovery_compare.py`), and review
+  regressions are implemented. The poisoned-memory headline demo
   (`python -m tenet.demo`) runs a deterministic `GullibleBrain` through a naive
   agent and the Tenet loop, using a labeled demo fixture policy. Production
   policy is still pending. See
@@ -453,7 +454,9 @@ the trusted principal, gated by one bearer token (the server refuses to start
 without a 16+ character token). Task requests carry task text and a grant only;
 the Brain is chosen at deployment, so HTTP callers cannot submit proposals.
 Escalations go to the server's approver (fail-safe deny by default); there is
-no approval endpoint. Responses omit read file content.
+no approval endpoint. Responses omit read file content. Generated docs
+(`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
+cover them.
 
 ---
 

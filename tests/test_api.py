@@ -159,3 +159,21 @@ def test_non_utf8_constraint_values_are_422(tmp_path):
     response = client.post("/tasks", content=task, headers={**AUTH, "content-type": "application/json"})
     assert response.status_code == 422
     assert len(memory.log) == before
+
+
+def test_generated_docs_are_not_served(tmp_path):
+    client, _, _ = _client(tmp_path)
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404
+        assert client.get(path, headers=AUTH).status_code == 404
+
+
+def test_malformed_journal_trace_is_reported_by_audit_endpoint(tmp_path):
+    from test_bugfixes import malformed_journal_log
+    log, _ = malformed_journal_log()
+    app = create_app(memory=MemoryCore(HashingEmbedder(), log=log),
+                     executor=fs_executor(tmp_path), policy=DemoFixturePolicy(),
+                     brain_factory=GullibleBrain, token=TOKEN)
+    response = TestClient(app).get("/audit", headers=AUTH)
+    assert response.status_code == 200
+    assert any("malformed" in issue for issue in response.json()["issues"])

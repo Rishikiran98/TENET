@@ -9,14 +9,18 @@ build order — lives in [CLAUDE.md](CLAUDE.md). Read it before changing anythin
 
 ## Correctness repair and comparison
 
-The [A1 contract](docs/correctness-contract.md) and
-[A2 interface/schema amendment](docs/correctness-contract-a2.md) supersede conflicting
-prototype guarantees in the original design. The repair includes immutable
+The [A1 contract](docs/correctness-contract.md),
+[A2 interface/schema amendment](docs/correctness-contract-a2.md) and
+[A3 journal reconciliation amendment](docs/correctness-contract-a3.md) supersede
+conflicting prototype guarantees in the original design. The repair includes immutable
 records, single-use task/grant claims, bound approvals, dispatch expiry checks,
 symlink rejection, ingestion retry keys, atomic projection rebuilds, and an
 optional `SQLiteEventLog` for durability. Version 0.3.0 adds proposal-causal audits,
 strict receipts and filesystem arguments, bounded Brain observations, incremental
 SQLite loading, and automatic hydration on reopen. In-memory logs remain process-local.
+The current version, 0.4.0 (A3), adds a transactional `journal.append` tool and
+operator reconciliation of uncertain journal dispatches (event schema 3, 16 event
+types); ordinary filesystem effects keep A2's uncertainty.
 
 Current validation and API migration notes are in
 [review follow-up](docs/review-follow-up.md).
@@ -77,6 +81,14 @@ folded from that log. Nothing is authoritative except the log.
   Logical `path_prefix` violations are blocked by the gate before dispatch.
   Grant constraints are re-checked at the executor — defense in
   depth; it does not trust that the gate was the only path to it.
+- **Journal + reconciliation** (`src/tenet/journal.py`, `src/tenet/recovery.py`,
+  A3) — `journal.append` writes a bounded report and its operation receipt in one
+  SQLite transaction, bound to the dispatch's operation ID, proposal digest,
+  grant and store identity. When a crash leaves a journal dispatch without an
+  outcome, `reconcile_journal` (a trusted operator API, not a Brain tool)
+  inspects the store: it records `action.reconciled` as *applied* if the report
+  committed, or fences the operation as *cancelled* so a late worker can never
+  apply it. It never retries the effect, refunds budget or reopens the task.
 - **Headline demo + audit view** (`src/tenet/demo/`, `src/tenet/projections/`) —
   a poisoned memory entry tells the agent to delete `/protected/secrets.txt`.
   The same deterministic, deliberately gullible Brain drives a naive RAG agent
@@ -133,8 +145,9 @@ TENET_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 A task request carries the task text and the grant only. The Brain is chosen by
 whoever deploys the server, so callers cannot submit proposals; intent and
 authority stay on separate paths. Escalations fail closed (no approval
-endpoint), responses never include read file content, and the API is not
-multi-tenant.
+endpoint), responses never include read file content, the generated
+`/docs`, `/redoc` and `/openapi.json` are disabled (they would bypass the token),
+and the API is not multi-tenant.
 
 No install? `PYTHONPATH=src` works too (the tests already put `src/` on the path).
 

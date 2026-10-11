@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from .contextstore import ContextStore, InMemoryContextStore
 from .contextualizer import ChunkEmbedContextualizer, Contextualizer
-from .core import MemoryCore
+from .core import IngestConflict, MemoryCore, ProjectionError
 from .embedder import Embedder, HashingEmbedder, SentenceTransformerEmbedder
 from .models import ContextRecord, RawRecord, RetrievalResult, content_hash
 from .rawstore import InMemoryRawStore, RawStore
@@ -20,6 +20,8 @@ from .retriever import Retriever
 
 __all__ = [
     "MemoryCore",
+    "IngestConflict",
+    "ProjectionError",
     "Embedder",
     "HashingEmbedder",
     "SentenceTransformerEmbedder",

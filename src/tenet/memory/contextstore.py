@@ -31,6 +31,9 @@ class ContextStore(Protocol):
 
     def empty(self): ...
 
+    def is_empty(self) -> bool:
+        ...
+
     def clear(self) -> None:
         ...
 
@@ -54,6 +57,9 @@ class InMemoryContextStore:
         if namespace is None:
             return records
         return [r for r in records if r.namespace == namespace]
+
+    def is_empty(self) -> bool:
+        return not self._records
 
     def clear(self) -> None:
         self._records.clear()
