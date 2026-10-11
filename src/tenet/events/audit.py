@@ -24,6 +24,7 @@ def audit_trace(log) -> TraceAudit:
     by_id, tasks, proposals, dispatches, outcomes = {}, {}, {}, {}, {}
     verdicts, requests, approvals, evidence = {}, {}, {}, {}
     grants, counts, closed = set(), {}, set()
+    task_namespaces, invalid_operations = {}, set()
     issues = []
 
     def related(ref, event, kind=None):
@@ -55,6 +56,7 @@ def audit_trace(log) -> TraceAudit:
                 if g['task_id'] != task:
                     issues.append(f'{e.event_id}: task/grant binding mismatch')
                 tasks[task] = g
+                task_namespaces[task] = e.namespace
                 grants.add(g['grant_id']); counts.setdefault(task, 0)
         elif kind == T.AGENT_RETRIEVAL_PERFORMED:
             evidence[e.event_id] = frozenset(p['context_ids'])
@@ -124,9 +126,10 @@ def audit_trace(log) -> TraceAudit:
             op = p['operation_id']
             if op in dispatches or op in closed:
                 issues.append(f'{op}: duplicate or previously closed dispatch')
+                invalid_operations.add(op)
             dispatches[op] = e
             g, proposal = tasks.get(task), related(op, e, T.AGENT_ACTION_PROPOSED)
-            if g is None or proposal is None:
+            if g is None or proposal is None or task_namespaces.get(task) != e.namespace:
                 issues.append(f'{op}: missing task/proposal authority')
             else:
                 counts[task] += 1
@@ -161,15 +164,22 @@ def audit_trace(log) -> TraceAudit:
                 issues.append(f'{op}: no proposal-specific recorded authorization')
         elif kind in {T.ACTION_EXECUTED, T.ACTION_FAILED, T.ACTION_INDETERMINATE}:
             op = p.get('operation_id'); dispatch = dispatches.get(op)
+            valid = e.schema_version >= 2
             if dispatch is None or related(dispatch.event_id, e) is None:
                 issues.append(f'{e.event_id}: outcome without matching dispatch')
+                valid = False
             elif (e.causation_id != dispatch.event_id or
                   p.get('proposal_digest') != dispatch.payload['proposal_digest'] or
                   p.get('grant_id') != dispatch.payload['grant_id']):
                 issues.append(f'{op}: outcome binding mismatch')
-            if op in outcomes: issues.append(f'{op}: duplicate outcome')
-            outcomes[op] = kind; closed.add(op)
+                valid = False
+            if op in outcomes:
+                issues.append(f'{op}: duplicate outcome')
+                invalid_operations.add(op)
+            if valid:
+                outcomes[op] = kind
+            closed.add(op)
         by_id[e.event_id] = e
     unknown = tuple(sorted(op for op in dispatches
-                           if op not in outcomes or outcomes[op] == T.ACTION_INDETERMINATE))
+                           if op in invalid_operations or op not in outcomes or outcomes[op] == T.ACTION_INDETERMINATE))
     return TraceAudit(tuple(issues), unknown)

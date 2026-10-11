@@ -199,8 +199,8 @@ class AgentLoop:
     def _execute(self, namespace, proposal, grant, corr, cause, operation_id, dispatch_time):
         payload = {'operation_id': operation_id, 'proposal_digest': proposal.digest,
                    'grant_id': grant.grant_id, 'accepted_at': dispatch_time.isoformat()}
-        dispatched = self._emit(namespace, Actor('system', 'loop'), T.ACTION_DISPATCHED,
-                                payload, corr, cause)
+        dispatched = self._log.append_committed(namespace=namespace, actor=Actor('system', 'loop'),
+            event_type=T.ACTION_DISPATCHED, payload=payload, correlation_id=corr, causation_id=cause)
         observation, error = None, None
         try:
             observation = self._executor.execute(proposal, grant.tool_grant(proposal.tool))

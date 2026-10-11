@@ -56,6 +56,8 @@ class EventLog(Protocol):
 
     def transaction(self): ...
 
+    def append_committed(self, **kwargs) -> Event: ...
+
 
 class InMemoryEventLog:
     """Thread-safe, process-local log. Use SQLiteEventLog for restart durability."""
@@ -64,12 +66,14 @@ class InMemoryEventLog:
         self._events: list[Event] = []
         self._lock = RLock()
         self._event_ids = set()
+        self._depth = 0
 
     @contextmanager
     def transaction(self):
         """Serialize a read/check/append unit; roll back new events on error."""
         with self._lock:
             start = len(self._events)
+            self._depth += 1
             try:
                 yield
             except BaseException:
@@ -77,6 +81,19 @@ class InMemoryEventLog:
                     self._event_ids.discard(event.event_id)
                 del self._events[start:]
                 raise
+            finally:
+                self._depth -= 1
+
+    def append_committed(self, **kwargs):
+        """Append outside caller transactions before an external effect.
+
+        SQLite's append returns only after COMMIT. A savepoint release inside
+        a caller transaction is not a durable dispatch boundary.
+        """
+        with self._lock:
+            if self._depth:
+                raise RuntimeError('external effects cannot run inside a log transaction')
+            return self.append(**kwargs)
 
     def _persist(self, event):
         """Durable implementations persist before publishing to readers."""
