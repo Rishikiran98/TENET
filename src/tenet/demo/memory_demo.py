@@ -11,7 +11,7 @@ Shows five things:
     5. PROJECTIONS: drop the context store and rebuild it purely by replaying the
        log — retrieval is identical, and the log verifies as untampered.
 
-Run:  python -m tenet.demo
+Run:  python -m tenet.demo.memory_demo
 """
 
 from __future__ import annotations
