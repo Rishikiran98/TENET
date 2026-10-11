@@ -47,6 +47,12 @@ class Retriever:
         if not allowed:
             return []
 
+        # 2+3. a store that ranks itself (pgvector) gets only granted namespaces
+        #      and must filter them in the same query that ranks
+        search = getattr(self._store, "search", None)
+        if search is not None:
+            return search(self._embedder.embed(query), sorted(allowed), limit)
+
         # 2. namespace filter at the storage boundary
         candidates = [
             record for ns in sorted(allowed) for record in self._store.list(namespace=ns)

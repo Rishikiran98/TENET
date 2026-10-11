@@ -95,6 +95,26 @@ python -m tenet.demo         # headline demo: poisoned memory, naive vs. Tenet a
 python -m tenet.demo.memory_demo   # memory-core walkthrough: ranking + scope isolation
 ```
 
+To run the context projection on Postgres + pgvector instead of in memory:
+
+```bash
+pip install -e ".[postgres,dev]"
+export TENET_PG_DSN="host=localhost dbname=tenet user=tenet"   # needs CREATE EXTENSION vector
+pytest tests/test_pgvector.py   # skipped when TENET_PG_DSN is unset
+```
+
+```python
+from tenet import HashingEmbedder, MemoryCore
+from tenet.memory.pgvector import PgVectorContextStore
+
+store = PgVectorContextStore(dsn, dim=256, table="tenet_context")  # one table per log
+memory = MemoryCore(HashingEmbedder(dim=256), context_store=store, log=durable_log)
+```
+
+The table is still a disposable projection: MemoryCore rebuilds it from the log
+on start. Ranking is exact (no ANN index) so results match the in-memory store;
+scores use pgvector's single precision and may differ by about 1e-7.
+
 No install? `PYTHONPATH=src` works too (the tests already put `src/` on the path).
 
 ```python
@@ -121,7 +141,8 @@ log.verify()                 # True — the hash chain holds
 6. **Executor + sandboxed fs tools** ✅
 7. **Headline demo** — poisoned corpus, naive agent vs. Tenet agent, audit view as
    the receipt ✅
-8. Then pgvector · 9. Then FastAPI
+8. **pgvector context store** ✅
+9. Then FastAPI
 
 ## What this defends against (and what it doesn't)
 
