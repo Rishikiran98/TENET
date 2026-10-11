@@ -55,12 +55,14 @@ def _grant(*namespaces, task="t"):
 
 
 def _cores(store, log=None):
+    """Both cores project the SAME log, so context_ids (ULID-derived) agree and
+    tied scores break ties identically. Separate ingests would mint different
+    ULIDs whose relative order is random within a millisecond."""
     embedder = HashingEmbedder(dim=DIM)
-    reference = MemoryCore(embedder)
     pg = MemoryCore(embedder, context_store=store, log=log)
     for ns, source, text in CORPUS:
-        reference.ingest(text, namespace=ns, source=source, ingest_id=source)
         pg.ingest(text, namespace=ns, source=source, ingest_id=source)
+    reference = MemoryCore(embedder, log=pg.log)
     return reference, pg
 
 

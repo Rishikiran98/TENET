@@ -156,14 +156,12 @@ class AgentLoop:
                     self._policy.version == policy_version and
                     not grant.is_expired(dispatch_time) and
                     actions_used < grant.max_actions and grant.tool_grant(proposal.tool) is not None and
-                    (proposal.tool != 'journal.append' or
-                     hasattr(self._executor, 'execute_operation')) and
+                    (proposal.tool != 'journal.append' or self._journal_capable()) and
                     (final.verdict is Verdict.ALLOW or
                      (final.verdict is Verdict.ESCALATE and surface is not None and
                       approval.approved and approval.binding == surface.binding))
                 )
-                if not authorized and proposal.tool == 'journal.append' and not hasattr(
-                        self._executor, 'execute_operation'):
+                if not authorized and proposal.tool == 'journal.append' and not self._journal_capable():
                     final = GateDecision(Verdict.DENY, (), 'executor cannot provide journal dispatch identity')
                 elif not authorized:
                     final = GateDecision(Verdict.DENY, (), 'dispatch authorization changed or expired')
@@ -194,6 +192,12 @@ class AgentLoop:
         self._emit(namespace, Actor('system', 'loop'), T.TASK_ABORTED,
                    {'reason': result.reason, 'actions_used': actions_used}, corr, cause)
         return result
+
+    def _journal_capable(self):
+        """A journal dispatch needs the store's identity and the operation API."""
+        store_id = getattr(self._executor, 'store_id', None)
+        return (isinstance(store_id, str) and bool(store_id) and
+                callable(getattr(self._executor, 'execute_operation', None)))
 
     def _verdict(self, namespace, corr, cause, decision, policy_version, proposal_ref, phase):
         return self._emit(namespace, Actor('gate', 'gate'), T.GATE_VERDICT_ISSUED,

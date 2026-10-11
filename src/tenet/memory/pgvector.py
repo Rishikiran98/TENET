@@ -139,6 +139,10 @@ class PgVectorContextStore:
                                   .format(t=self._t), params).fetchall()
         return [_record(r) for r in rows]
 
+    def is_empty(self) -> bool:
+        return self._conn.execute(self._sql.SQL("SELECT NOT EXISTS (SELECT 1 FROM {t})")
+                                  .format(t=self._t)).fetchone()[0]
+
     def clear(self) -> None:
         self._conn.execute(self._sql.SQL("DELETE FROM {t}").format(t=self._t))
 

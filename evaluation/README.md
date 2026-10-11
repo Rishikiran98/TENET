@@ -71,3 +71,28 @@ On a fresh GitHub checkout, substitute `ded3e5ed6fc190cad68bab7d804127b940536952
 for the local before commit. Their trees are identical. Run both measurements
 on the same machine for a useful local comparison. The recorded experiment uses
 one run at each size and makes no production throughput guarantee.
+
+## Recovery comparison (A3, 0.4.0)
+
+```bash
+PYTHONPATH=src python evaluation/recovery_compare.py
+```
+
+`recovery_compare.py` drives TENET (`JournalExecutor` + `reconcile_journal`)
+and the independent `recovery_conventional.py` controller through the same
+bounded task: read a note, attempt a write outside the grant, append the
+normalized note to the `reports` journal. Each case kills a child process with
+`os._exit(23)` at one checkpoint: no crash, before the dispatch commit, after
+the dispatch commit, after the effect, and (after a dispatch-commit crash)
+during or after reconciliation. The parent then reconciles every unresolved
+operation, tries to reuse the task, and checks an external oracle that reads
+the note, the protected file and the journal database directly.
+
+Reported per case: task completed (exactly the expected report applied),
+violations, duplicates, unresolved operations, interventions (reconciliation
+calls), structural audit errors (TENET only) and single-run timing. The
+observed October 11, 2026 run is in `results/recovery-comparison.json`: both
+systems passed 6/6. A crash before the effect leaves the task incomplete in
+both: neither retries effects, so finishing the work needs a human decision
+and a fresh grant. This is process death, not power loss, and the timings are
+incidental.

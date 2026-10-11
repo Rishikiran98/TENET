@@ -30,6 +30,16 @@ def _raw_from_event(event) -> RawRecord:
     )
 
 
+def _store_is_empty(store) -> bool:
+    """Cheap emptiness probe; stores may implement is_empty() to avoid list()."""
+    probe = getattr(store, "is_empty", None)
+    return probe() if probe is not None else not store.list()
+
+
+class IngestConflict(ValueError):
+    """The ingest_id was already used for different content or metadata."""
+
+
 class ProjectionError(RuntimeError):
     """Raw data was accepted; retry the same ingest_id to finish projection."""
     def __init__(self, raw_id, ingest_id):
@@ -68,7 +78,7 @@ class MemoryCore:
         self.clock = clock
         # A reused store (e.g. a pgvector table) must equal the fold of THIS
         # log; rows from another log would be unattributable.
-        if len(self._log) or self._context.list():
+        if len(self._log) or not _store_is_empty(self._context):
             self.rebuild_projections()
 
     @property
@@ -93,7 +103,7 @@ class MemoryCore:
                 if existing:
                     event = existing[0]
                     if dict(event.payload) != payload:
-                        raise ValueError("ingest_id already used for different content or metadata")
+                        raise IngestConflict("ingest_id already used for different content or metadata")
                 else:
                     event = self._log.append(
                         namespace=namespace, actor=actor or Actor(kind="user", id="ingest"),
@@ -117,18 +127,24 @@ class MemoryCore:
         also provide publish() and discard(); publish runs only after the whole
         rebuild succeeded, discard on any failure. In-memory stores keep the old
         snapshot for existing external references; a shared database does not.
+
+        The log transaction covers only verification and the snapshot. The
+        (possibly slow) contextualize/embed work runs after it, so a durable
+        log's write lock is not held while other connections need to append.
+        This core's own ingests still wait on its lock.
         """
-        with self._lock, self._log.transaction():
-            self._log.verify()
+        with self._lock:
+            with self._log.transaction():
+                self._log.verify()
+                snapshot = tuple(e for e in self._log if e.event_type == MEMORY_RAW_APPENDED)
             raw_store, context_store = self._raw.empty(), self._context.empty()
             try:
-                for event in self._log:
-                    if event.event_type == MEMORY_RAW_APPENDED:
-                        raw = _raw_from_event(event)
-                        contexts = list(self._contextualizer.contextualize(raw))
-                        raw_store.add(raw)
-                        for ctx in contexts:
-                            context_store.upsert(ctx)
+                for event in snapshot:
+                    raw = _raw_from_event(event)
+                    contexts = list(self._contextualizer.contextualize(raw))
+                    raw_store.add(raw)
+                    for ctx in contexts:
+                        context_store.upsert(ctx)
                 if hasattr(context_store, "publish"):
                     context_store.publish()
             except BaseException:

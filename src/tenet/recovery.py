@@ -11,13 +11,23 @@ def reconcile_journal(log, executor, operation_id):
     The log transaction serializes recovery workers. The store transaction
     fences the original worker. A crash between stores is safe to inspect again.
     The task stays single-use and its dispatch still consumes budget.
+
+    The whole hash chain must verify, but only issues in this operation's own
+    task block it: a malformed event in an unrelated task carries no authority
+    over this operation and must not strand it.
     """
     with log.transaction():
         report = audit_trace(log)
-        if report.issues:
-            raise ValueError('cannot reconcile an invalid or legacy authority trace')
         events = tuple(log)
+        dispatch = next((e for e in events if e.event_type == T.ACTION_DISPATCHED and
+                         e.payload.get('operation_id') == operation_id), None)
+        if dispatch is None:
+            raise ValueError('operation has no unresolved dispatch')
+        if report.issues_by_task.get(dispatch.correlation_id):
+            raise ValueError('cannot reconcile an invalid or legacy authority trace')
         prior = next((e for e in events if e.event_type == T.ACTION_RECONCILED and
+                      e.correlation_id == dispatch.correlation_id and
+                      e.causation_id == dispatch.event_id and
                       e.payload['operation_id'] == operation_id), None)
         if prior:
             if prior.payload['executor_id'] != executor.store_id:
@@ -25,8 +35,6 @@ def reconcile_journal(log, executor, operation_id):
             return prior
         if operation_id not in report.indeterminate_operations:
             raise ValueError('operation has no unresolved dispatch')
-        dispatch = next(e for e in events if e.event_type == T.ACTION_DISPATCHED and
-                        e.payload['operation_id'] == operation_id)
         proposed = next(e for e in events if e.event_id == operation_id)
         p = proposed.payload
         proposal = Proposal(p['tool'], p['args'], p['justification'], p['cited_context_ids'])

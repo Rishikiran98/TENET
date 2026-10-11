@@ -40,7 +40,7 @@ from ..events import ChainError, new_ulid
 from ..events.audit import audit_trace
 from ..gate import DefaultGate, Gate, Policy
 from ..memory import MemoryCore
-from ..memory.core import ProjectionError
+from ..memory.core import IngestConflict, ProjectionError
 from ..projections import audit_view, render_audit
 from ..scope import ScopeGrant, ToolGrant
 from ..values import thaw
@@ -123,7 +123,10 @@ def create_app(
                                 headers={"WWW-Authenticate": "Bearer"})
         return principal
 
-    app = FastAPI(title="Tenet", version=__version__, dependencies=[Depends(require_principal)])
+    # Route dependencies do not cover FastAPI's generated docs, so they are
+    # disabled rather than served unauthenticated.
+    app = FastAPI(title="Tenet", version=__version__, dependencies=[Depends(require_principal)],
+                  docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.exception_handler(RequestValidationError)
     def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -142,9 +145,10 @@ def create_app(
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
                                 {"error": "accepted but not projected; retry with the same ingest_id",
                                  "raw_id": exc.raw_id, "ingest_id": exc.ingest_id})
+        except IngestConflict as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
         except ValueError as exc:
-            conflict = "ingest_id already used" in str(exc)
-            raise HTTPException(status.HTTP_409_CONFLICT if conflict else 422, str(exc))
+            raise HTTPException(422, str(exc))
         return {"raw_id": raw.raw_id, "content_hash": raw.content_hash}
 
     @app.post("/tasks")

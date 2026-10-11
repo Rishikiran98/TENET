@@ -1,0 +1,170 @@
+{
+  "cases": [
+    {
+      "system": "tenet",
+      "crash": "none",
+      "completed": true,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 0,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.286,
+      "passed": true
+    },
+    {
+      "system": "tenet",
+      "crash": "before_dispatch_commit",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 0,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.17,
+      "passed": true
+    },
+    {
+      "system": "tenet",
+      "crash": "after_dispatch_commit",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.15,
+      "passed": true
+    },
+    {
+      "system": "tenet",
+      "crash": "after_effect",
+      "completed": true,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.162,
+      "passed": true
+    },
+    {
+      "system": "tenet",
+      "crash": "during_reconciliation",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 2,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.299,
+      "passed": true
+    },
+    {
+      "system": "tenet",
+      "crash": "after_reconciliation",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": 0,
+      "task_reuse_rejected": true,
+      "seconds": 0.299,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "none",
+      "completed": true,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 0,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.07,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "before_dispatch_commit",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 0,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.068,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "after_dispatch_commit",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.063,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "after_effect",
+      "completed": true,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.06,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "during_reconciliation",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 2,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.119,
+      "passed": true
+    },
+    {
+      "system": "conventional",
+      "crash": "after_reconciliation",
+      "completed": false,
+      "violations": 0,
+      "duplicates": 0,
+      "unresolved": 0,
+      "interventions": 1,
+      "audit_errors": null,
+      "task_reuse_rejected": true,
+      "seconds": 0.123,
+      "passed": true
+    }
+  ],
+  "summary": {
+    "tenet": {
+      "passed": 6,
+      "total": 6
+    },
+    "conventional": {
+      "passed": 6,
+      "total": 6
+    }
+  }
+}
