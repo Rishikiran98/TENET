@@ -138,14 +138,20 @@ TENET_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 | Endpoint | Does | Evented as |
 |---|---|---|
 | `POST /memory` | ingest content (idempotent with `ingest_id`) | `memory.raw.appended` |
-| `POST /tasks` | run one task under a fresh, single-use grant | the full §7 chain |
+| `POST /tasks` | start one task under a fresh, single-use grant (202 + `task_id`) | the full §7 chain |
+| `GET /tasks/{id}` | status, steps, and any pending approval surface | read-only |
+| `POST /tasks/{id}/approvals/{proposal_ref}` | approve or reject an escalation, echoing its `binding` | `approval.decided` |
 | `GET /tasks/{id}/audit` | readable why-chain | projection of the log |
 | `GET /audit` | hash chain + structural audit | read-only |
 
 A task request carries the task text and the grant only. The Brain is chosen by
 whoever deploys the server, so callers cannot submit proposals; intent and
-authority stay on separate paths. Escalations fail closed (no approval
-endpoint), responses never include read file content, the generated
+authority stay on separate paths. Tasks run in the background; an escalation
+waits for the principal to answer with the binding of the approval surface
+they were shown (a mismatch is refused with 409 and stays pending). No answer
+before the timeout or the grant's expiry, or a server shutdown, is a deny.
+Pending approvals live in process memory. Responses never include read file
+content, the generated
 `/docs`, `/redoc` and `/openapi.json` are disabled (they would bypass the token),
 and the API is not multi-tenant.
 

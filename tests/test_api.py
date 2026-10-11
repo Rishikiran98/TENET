@@ -1,5 +1,7 @@
 """Step 9: the HTTP surface is the principal's channel; the Brain is server-side."""
 
+import time
+
 import pytest
 
 pytest.importorskip("fastapi")
@@ -19,6 +21,23 @@ TOKEN = "t" * 32
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 READ_PROJECT = {"namespaces": [NAMESPACE], "max_actions": 3, "ttl_seconds": 600,
                 "tools": [{"tool": "fs.read", "constraints": {"path_prefix": "/project"}}]}
+
+
+def run_task(client, body, *, until=("completed", "aborted", "failed"), timeout=10.0):
+    """Submit a task (202) and poll GET /tasks/{id} until it reaches ``until``."""
+    response = client.post("/tasks", headers=AUTH, json=body)
+    assert response.status_code == 202, response.text
+    return wait_for(client, response.json()["task_id"], until=until, timeout=timeout)
+
+
+def wait_for(client, task_id, *, until=("completed", "aborted", "failed"), timeout=10.0):
+    deadline = time.monotonic() + timeout
+    while True:
+        state = client.get(f"/tasks/{task_id}", headers=AUTH).json()
+        if state["status"] in until:
+            return state
+        assert time.monotonic() < deadline, state
+        time.sleep(0.01)
 
 
 def _client(tmp_path, brain_factory=GullibleBrain, corpus=True):
@@ -53,11 +72,9 @@ def test_short_token_refused(tmp_path):
 
 def test_headline_demo_over_http(tmp_path):
     client, _, root = _client(tmp_path)
-    response = client.post("/tasks", headers=AUTH, json={
+    body = run_task(client, {
         "task": "summarize the project notes", "namespace": NAMESPACE, "grant": READ_PROJECT})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["completed"]
+    assert body["status"] == "completed" and body["completed"]
     assert [(s["tool"], s["verdict"], s["outcome"]) for s in body["steps"]] == [
         ("fs.read", "allow", T.ACTION_EXECUTED), ("fs.delete", "deny", T.ACTION_BLOCKED)]
     assert "content" not in body["steps"][0]["result"]  # never return read text
@@ -99,8 +116,7 @@ def test_each_task_gets_a_fresh_single_use_grant(tmp_path):
     proposals = [Proposal("fs.read", {"path": "/project/notes.md"})]
     client, _, _ = _client(tmp_path, brain_factory=lambda: ScriptedBrain(proposals), corpus=False)
     request = {"task": "read notes", "namespace": NAMESPACE, "grant": READ_PROJECT}
-    first = client.post("/tasks", headers=AUTH, json=request).json()
-    second = client.post("/tasks", headers=AUTH, json=request).json()
+    first, second = run_task(client, request), run_task(client, request)
     assert first["task_id"] != second["task_id"] and first["grant_id"] != second["grant_id"]
     assert [s["outcome"] for s in first["steps"] + second["steps"]] == [T.ACTION_EXECUTED] * 2
 
@@ -125,9 +141,9 @@ def test_demo_factory(monkeypatch):
     from tenet.api.demo import app
     monkeypatch.setenv("TENET_API_TOKEN", TOKEN)
     client = TestClient(app())
-    response = client.post("/tasks", headers=AUTH, json={
+    state = run_task(client, {
         "task": "summarize the project notes", "namespace": NAMESPACE, "grant": READ_PROJECT})
-    assert [s["verdict"] for s in response.json()["steps"]] == ["allow", "deny"]
+    assert [s["verdict"] for s in state["steps"]] == ["allow", "deny"]
 
 
 def test_non_utf8_strings_are_422_not_500(tmp_path):

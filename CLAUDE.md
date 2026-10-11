@@ -453,8 +453,16 @@ HTTP (step 9): `api/app.py::create_app` is a single-tenant FastAPI surface for
 the trusted principal, gated by one bearer token (the server refuses to start
 without a 16+ character token). Task requests carry task text and a grant only;
 the Brain is chosen at deployment, so HTTP callers cannot submit proposals.
-Escalations go to the server's approver (fail-safe deny by default); there is
-no approval endpoint. Responses omit read file content. Generated docs
+Tasks run on worker threads: `POST /tasks` returns 202 and `GET /tasks/{id}`
+reports status. An ESCALATE verdict waits for the principal to answer at
+`POST /tasks/{id}/approvals/{proposal_ref}` with the binding of the surface they
+were shown (`api/tasks.py::HttpApprover`); a wrong binding is refused and stays
+pending. No answer before `approval_timeout` or the grant's expiry, or a server
+shutdown, is a deny. The loop, events and audit are unchanged: the decision
+lands in the existing `approval.decided` event. Pending approvals and running
+tasks live in process memory; after a restart such a task reports
+`interrupted` (no effect is uncertain: dispatch follows the decision).
+Responses omit read file content. Generated docs
 (`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
 cover them.
 
