@@ -77,13 +77,22 @@ folded from that log. Nothing is authoritative except the log.
   Logical `path_prefix` violations are blocked by the gate before dispatch.
   Grant constraints are re-checked at the executor — defense in
   depth; it does not trust that the gate was the only path to it.
+- **Headline demo + audit view** (`src/tenet/demo/`, `src/tenet/projections/`) —
+  a poisoned memory entry tells the agent to delete `/protected/secrets.txt`.
+  The same deterministic, deliberately gullible Brain drives a naive RAG agent
+  (which deletes it) and the Tenet loop (which retrieves it as data, proposes
+  the delete, and gets DENY → `action.blocked` from the grant check). The audit
+  view folds the log into a why-chain from each proposal back to the cited
+  memory source. The demo policy is a labeled fixture, not production policy,
+  and the Brain is not an LLM.
 
 ## Run it
 
 ```bash
 pip install -e ".[dev]"      # numpy + pytest
 pytest                       # event log + memory core (all green)
-python -m tenet.demo         # memory-core walkthrough: ranking + scope isolation
+python -m tenet.demo         # headline demo: poisoned memory, naive vs. Tenet agent
+python -m tenet.demo.memory_demo   # memory-core walkthrough: ranking + scope isolation
 ```
 
 No install? `PYTHONPATH=src` works too (the tests already put `src/` on the path).
@@ -110,8 +119,8 @@ log.verify()                 # True — the hash chain holds
 4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring next)
 5. **Agent loop + approver/escalate path** ✅
 6. **Executor + sandboxed fs tools** ✅
-7. Headline demo — poisoned corpus, naive agent vs. Tenet agent, audit view as
-   the receipt
+7. **Headline demo** — poisoned corpus, naive agent vs. Tenet agent, audit view as
+   the receipt ✅
 8. Then pgvector · 9. Then FastAPI
 
 ## What this defends against (and what it doesn't)
