@@ -156,11 +156,16 @@ class AgentLoop:
                     self._policy.version == policy_version and
                     not grant.is_expired(dispatch_time) and
                     actions_used < grant.max_actions and grant.tool_grant(proposal.tool) is not None and
+                    (proposal.tool != 'journal.append' or
+                     hasattr(self._executor, 'execute_operation')) and
                     (final.verdict is Verdict.ALLOW or
                      (final.verdict is Verdict.ESCALATE and surface is not None and
                       approval.approved and approval.binding == surface.binding))
                 )
-                if not authorized:
+                if not authorized and proposal.tool == 'journal.append' and not hasattr(
+                        self._executor, 'execute_operation'):
+                    final = GateDecision(Verdict.DENY, (), 'executor cannot provide journal dispatch identity')
+                elif not authorized:
                     final = GateDecision(Verdict.DENY, (), 'dispatch authorization changed or expired')
                 verdict = self._verdict(namespace, corr, cause, final, self._policy.version, proposed.event_id, 'dispatch')
                 cause, decision = verdict.event_id, final

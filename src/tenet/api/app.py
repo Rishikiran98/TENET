@@ -23,17 +23,20 @@ file content; like the log receipts, they carry metadata only.
 from __future__ import annotations
 
 import hmac
+import json
 from dataclasses import asdict
-from typing import Callable
+from typing import Annotated, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from .. import __version__
 from ..agent import AgentLoop, Brain, Executor
 from ..agent.loop import AuditWriteError
 from ..approver import Approver, FailSafeDenyApprover
-from ..events import new_ulid
+from ..events import ChainError, new_ulid
 from ..events.audit import audit_trace
 from ..gate import DefaultGate, Gate, Policy
 from ..memory import MemoryCore
@@ -41,6 +44,17 @@ from ..memory.core import ProjectionError
 from ..projections import audit_view, render_audit
 from ..scope import ScopeGrant, ToolGrant
 from ..values import thaw
+
+
+def _utf8_json(value: dict) -> dict:
+    # Pydantic rejects lone surrogates in str fields, but not inside free-form
+    # JSON objects; such text cannot be hashed into the log.
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("constraints must be valid UTF-8 text") from exc
+    return value
+
 
 _Name = Field(min_length=1, max_length=256)
 
@@ -59,7 +73,7 @@ class IngestRequest(_Strict):
 
 class ToolGrantBody(_Strict):
     tool: str = _Name
-    constraints: dict = Field(default_factory=dict)
+    constraints: Annotated[dict, AfterValidator(_utf8_json)] = Field(default_factory=dict)
 
 
 class GrantBody(_Strict):
@@ -111,6 +125,14 @@ def create_app(
 
     app = FastAPI(title="Tenet", version=__version__, dependencies=[Depends(require_principal)])
 
+    @app.exception_handler(RequestValidationError)
+    def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
+        # FastAPI's default 422 echoes the input, which may itself be invalid
+        # UTF-8 (and is untrusted); report only where and why validation failed.
+        errors = [{"loc": list(e.get("loc", ())), "msg": e.get("msg", ""), "type": e.get("type", "")}
+                  for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": errors})
+
     @app.post("/memory", status_code=status.HTTP_201_CREATED)
     def ingest(body: IngestRequest) -> dict:
         try:
@@ -121,7 +143,8 @@ def create_app(
                                 {"error": "accepted but not projected; retry with the same ingest_id",
                                  "raw_id": exc.raw_id, "ingest_id": exc.ingest_id})
         except ValueError as exc:
-            raise HTTPException(status.HTTP_409_CONFLICT, str(exc))
+            conflict = "ingest_id already used" in str(exc)
+            raise HTTPException(status.HTTP_409_CONFLICT if conflict else 422, str(exc))
         return {"raw_id": raw.raw_id, "content_hash": raw.content_hash}
 
     @app.post("/tasks")
@@ -166,7 +189,11 @@ def create_app(
 
     @app.get("/audit")
     def log_audit() -> dict:
-        trace = audit_trace(memory.log)  # verifies the hash chain first; raises if broken
+        try:
+            trace = audit_trace(memory.log)  # verifies the hash chain first
+        except ChainError as exc:
+            return JSONResponse(status_code=status.HTTP_409_CONFLICT,
+                                content={"chain_verified": False, "error": str(exc)})
         return {"chain_verified": True, "events": len(memory.log),
                 "issues": list(trace.issues),
                 "indeterminate_operations": list(trace.indeterminate_operations)}

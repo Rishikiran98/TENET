@@ -66,7 +66,9 @@ class MemoryCore:
         self._embedder = embedder
         self._lock = RLock()
         self.clock = clock
-        if len(self._log):
+        # A reused store (e.g. a pgvector table) must equal the fold of THIS
+        # log; rows from another log would be unattributable.
+        if len(self._log) or self._context.list():
             self.rebuild_projections()
 
     @property

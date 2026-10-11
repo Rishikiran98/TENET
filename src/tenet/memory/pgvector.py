@@ -163,7 +163,11 @@ class PgVectorContextStore:
         """An unpublished replacement: every row deleted inside its own
         transaction, invisible to readers until ``publish()``."""
         staging = PgVectorContextStore(self._dsn, dim=self.dim, table=self.table, _staging=True)
-        staging.clear()
+        try:
+            staging.clear()
+        except BaseException:
+            staging.close()
+            raise
         return staging
 
     def publish(self) -> None:
@@ -173,9 +177,14 @@ class PgVectorContextStore:
             self._staging = False
 
     def discard(self) -> None:
+        """Best effort: never mask the rebuild error that triggered it."""
         if self._staging:
-            self._conn.rollback()
-            self.close()
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            finally:
+                self.close()
 
     def close(self) -> None:
         self._conn.close()
