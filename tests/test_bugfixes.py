@@ -198,3 +198,39 @@ def test_construction_probes_emptiness_without_listing():
             raise AssertionError("list() must not be used to test emptiness")
 
     MemoryCore(HashingEmbedder(), context_store=NoList())
+
+
+# --- third review pass ---------------------------------------------------------
+
+def _initiated(log, task, grant):
+    return log.append(namespace="n", actor=Actor("user", "u"), event_type=T.TASK_INITIATED,
+                      payload={"description": "d", "grant": grant}, correlation_id=task)
+
+
+def test_malformed_task_record_does_not_block_new_tasks():
+    memory = MemoryCore(HashingEmbedder())
+    _initiated(memory.log, "legacy", {"tools": []})  # no grant_id
+    loop = AgentLoop(memory=memory, gate=DefaultGate(), policy=AllowAll(),
+                     approver=FailSafeDenyApprover(), executor=fs_executor(tempfile.mkdtemp()))
+    grant = ScopeGrant.issue(principal="p", task_id="fresh", namespaces={"n"})
+    assert loop.run_task(task="x", grant=grant, namespace="n", brain=ScriptedBrain([])).completed
+    with pytest.raises(ValueError, match="already started"):
+        loop.run_task(task="x", grant=grant, namespace="n", brain=ScriptedBrain([]))
+
+
+@pytest.mark.parametrize("grant, evidence", [
+    ({"grant_id": "g", "namespaces": None, "tools": 7}, []),
+    ({"grant_id": "g", "namespaces": ["n"], "tools": []}, None),
+    ({"grant_id": "g", "namespaces": ["n"], "tools": []}, ["not-a-mapping"]),
+])
+def test_audit_view_tolerates_malformed_events(grant, evidence):
+    log = InMemoryEventLog()
+    init = _initiated(log, "t", grant)
+    log.append(namespace="n", actor=Actor("agent", "a"), event_type=T.AGENT_RETRIEVAL_PERFORMED,
+               payload={"query": "q", "scope": ["n"], "context_ids": [], "evidence": evidence},
+               correlation_id="t", causation_id=init.event_id)
+    view = audit_view(log, "t")
+    text = render_audit(view)
+    assert "TASK t" in text
+    if evidence is not None and evidence != []:
+        assert view.unreadable and "unreadable" in text
