@@ -115,6 +115,27 @@ The table is still a disposable projection: MemoryCore rebuilds it from the log
 on start. Ranking is exact (no ANN index) so results match the in-memory store;
 scores use pgvector's single precision and may differ by about 1e-7.
 
+To serve the headline demo over HTTP (single principal, one bearer token):
+
+```bash
+pip install -e ".[api]"
+TENET_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  uvicorn tenet.api.demo:app --factory
+```
+
+| Endpoint | Does | Evented as |
+|---|---|---|
+| `POST /memory` | ingest content (idempotent with `ingest_id`) | `memory.raw.appended` |
+| `POST /tasks` | run one task under a fresh, single-use grant | the full §7 chain |
+| `GET /tasks/{id}/audit` | readable why-chain | projection of the log |
+| `GET /audit` | hash chain + structural audit | read-only |
+
+A task request carries the task text and the grant only. The Brain is chosen by
+whoever deploys the server, so callers cannot submit proposals; intent and
+authority stay on separate paths. Escalations fail closed (no approval
+endpoint), responses never include read file content, and the API is not
+multi-tenant.
+
 No install? `PYTHONPATH=src` works too (the tests already put `src/` on the path).
 
 ```python
@@ -142,7 +163,7 @@ log.verify()                 # True — the hash chain holds
 7. **Headline demo** — poisoned corpus, naive agent vs. Tenet agent, audit view as
    the receipt ✅
 8. **pgvector context store** ✅
-9. Then FastAPI
+9. **FastAPI surface** ✅
 
 ## What this defends against (and what it doesn't)
 

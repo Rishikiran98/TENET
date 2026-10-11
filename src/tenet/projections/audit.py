@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass, field
 
 from ..events import taxonomy as T
+from ..values import thaw
 
 _OUTCOMES = {T.ACTION_EXECUTED, T.ACTION_FAILED, T.ACTION_INDETERMINATE}
 
@@ -52,7 +53,7 @@ def audit_view(log, task_id: str) -> TaskAudit:
             continue
         p, kind = e.payload, e.event_type
         if kind == T.TASK_INITIATED:
-            audit = TaskAudit(task_id, p["description"], dict(p["grant"]), [], [])
+            audit = TaskAudit(task_id, p["description"], thaw(p["grant"]), [], [])
         elif audit is None:
             continue
         elif kind == T.AGENT_RETRIEVAL_PERFORMED:
@@ -61,13 +62,13 @@ def audit_view(log, task_id: str) -> TaskAudit:
             audit.retrieved = [(c, context_sources.get(c, "?")) for c in p["context_ids"]]
         elif kind == T.AGENT_ACTION_PROPOSED:
             trace = ProposalTrace(
-                e.event_id, p["tool"], dict(p["args"]), p["justification"],
+                e.event_id, p["tool"], thaw(p["args"]), p["justification"],
                 [(c, context_sources.get(c, "not retrieved")) for c in p["cited_context_ids"]])
             traces[e.event_id] = trace
             audit.proposals.append(trace)
         elif kind == T.GATE_VERDICT_ISSUED and p.get("proposal_ref") in traces:
             traces[p["proposal_ref"]].verdicts.append(
-                {k: p.get(k) for k in ("phase", "verdict", "rationale",
+                {k: thaw(p.get(k)) for k in ("phase", "verdict", "rationale",
                                        "matched_rule_ids", "policy_version")})
         elif kind == T.APPROVAL_DECIDED and p.get("proposal_ref") in traces:
             traces[p["proposal_ref"]].approvals.append(
@@ -77,7 +78,7 @@ def audit_view(log, task_id: str) -> TaskAudit:
         elif kind in _OUTCOMES and p.get("operation_id") in traces:
             trace = traces[p["operation_id"]]
             trace.outcome = kind
-            trace.outcome_detail = dict(p.get("result") or {}) or {"error": p.get("error")}
+            trace.outcome_detail = thaw(p.get("result") or {}) or {"error": p.get("error")}
         elif kind in (T.TASK_COMPLETED, T.TASK_ABORTED):
             audit.ending = kind
             audit.ending_reason = p.get("summary") or p.get("reason", "")
