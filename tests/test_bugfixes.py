@@ -296,3 +296,62 @@ def test_valid_execution_result_is_kept_as_recorded(tmp_path):
     [trace] = audit_view(memory.log, "t").proposals
     assert trace.outcome_detail["path"] == "a.txt" and "error" not in trace.outcome_detail
     assert audit_trace(memory.log).issues == ()
+
+
+def _replayed(events, edit):
+    """Re-append ``events`` to a fresh log, letting ``edit`` change payloads or add events."""
+    from tenet.values import thaw
+    log, ids = InMemoryEventLog(), {}
+
+    def remap(value):
+        if isinstance(value, dict):
+            return {k: remap(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [remap(v) for v in value]
+        return ids.get(value, value) if isinstance(value, str) else value
+
+    for e in events:
+        for event_type, payload in edit(e, remap(thaw(e.payload))):
+            new = log.append(namespace=e.namespace, actor=e.actor, event_type=event_type,
+                             payload=payload, correlation_id=e.correlation_id,
+                             causation_id=ids.get(e.causation_id) if e.causation_id else None)
+            ids.setdefault(e.event_id, new.event_id)
+    return log
+
+
+def _read_trace(tmp_path, fail=False):
+    memory = MemoryCore(HashingEmbedder())
+    loop = AgentLoop(memory=memory, gate=DefaultGate(), policy=AllowAll(),
+                     approver=FailSafeDenyApprover(), executor=fs_executor(tmp_path))
+    if not fail:
+        (tmp_path / "a.txt").write_text("x")
+    grant = ScopeGrant.issue(principal="p", task_id="t", namespaces={"n"},
+                             tools=(ToolGrant("fs.read"),))
+    loop.run_task(task="read", grant=grant, namespace="n",
+                  brain=ScriptedBrain([Proposal("fs.read", {"path": "a.txt"})]))
+    return list(memory.log)
+
+
+@pytest.mark.parametrize("extra", [{}, {"path": "unrelated"}])
+def test_failed_outcome_shows_its_error_even_with_an_extra_result(tmp_path, extra):
+    def edit(e, payload):
+        if e.event_type == T.ACTION_FAILED:
+            payload["result"] = extra
+        return [(e.event_type, payload)]
+    log = _replayed(_read_trace(tmp_path, fail=True), edit)
+    [trace] = audit_view(log, "t").proposals
+    assert trace.outcome == T.ACTION_FAILED
+    assert set(trace.outcome_detail) == {"error"} and "no such file" in trace.outcome_detail["error"]
+
+
+def test_unreadable_receipt_does_not_inherit_earlier_detail(tmp_path):
+    def edit(e, payload):
+        out = [(e.event_type, payload)]
+        if e.event_type == T.ACTION_EXECUTED:   # a second, malformed receipt for the same op
+            out.append((T.ACTION_EXECUTED, {**payload, "result": ["bad"]}))
+        return out
+    log = _replayed(_read_trace(tmp_path), edit)
+    view = audit_view(log, "t")
+    [trace] = view.proposals
+    assert trace.outcome == T.ACTION_EXECUTED and trace.outcome_detail == {}
+    assert view.unreadable
