@@ -1,5 +1,12 @@
 # Review status and validation
 
+**October 11, 2026 status (0.4.0).** A3 added the transactional journal and
+operator reconciliation, so the reconciliation limit below now applies only to
+ordinary filesystem effects. Later review rounds fixed the issues recorded in
+`tests/test_bugfixes.py`. The suite has 225 tests (213 run without a Postgres
+DSN; 12 need one). The table and measurements below are the 0.3.0 record and
+are kept unchanged.
+
 Updated October 10, 2026 for version 0.3.0. The six previously open items and the
 three argument-validation observations are addressed in this patch. The earlier
 75-test and 110-test results were incomplete evidence; the current suite passes
@@ -53,8 +60,9 @@ text into logged arguments or justification. These changes bound the direct read
 result path; they are not a general information-flow or retention policy.
 
 Custom Brains must accept the observations keyword. Tool output is untrusted.
-Indeterminate effects still stop execution; task resumption and reconciliation
-are not implemented. Native Windows, a real LLM, and production-scale concurrent
+Indeterminate effects still stop execution and tasks are never resumed. Since
+A3, only `journal.append` dispatches can be reconciled (`reconcile_journal`);
+ordinary filesystem effects remain unresolved. Native Windows, a real LLM, and production-scale concurrent
 workloads were not evaluated. External anchoring, hostile-host isolation, and
 hard-link provenance remain outside the contract.
 

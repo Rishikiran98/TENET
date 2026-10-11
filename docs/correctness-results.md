@@ -5,7 +5,7 @@ Measured October 10, 2026 against original commit
 
 **Review update:** subsequent review found missed import and gate-constraint
 bugs plus additional limitations. The two priority bugs are now repaired; see
-[review follow-up](review-follow-up.md) for current status and the 161-test suite.
+[review follow-up](review-follow-up.md) for current status and test counts.
 The measurements below describe the initial repair and its selected cases.
 
 The initial repair addressed the initially reproduced gaps under A1. The

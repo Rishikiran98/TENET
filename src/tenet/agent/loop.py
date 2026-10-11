@@ -74,9 +74,11 @@ class AgentLoop:
         with self._log.transaction():
             self._log.verify()
             for event in self._log:
+                # A malformed historical record must not make every new task fail.
+                recorded = event.payload.get('grant')
+                claimed = recorded.get('grant_id') if isinstance(recorded, Mapping) else None
                 if event.event_type == T.TASK_INITIATED and (
-                    event.correlation_id == grant.task_id or
-                    event.payload['grant']['grant_id'] == grant.grant_id
+                    event.correlation_id == grant.task_id or claimed == grant.grant_id
                 ):
                     raise ValueError("task or grant already started; resume is unsupported")
             initiated = self._emit(
