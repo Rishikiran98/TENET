@@ -25,6 +25,7 @@ def audit_trace(log) -> TraceAudit:
     verdicts, requests, approvals, evidence = {}, {}, {}, {}
     grants, counts, closed = set(), {}, set()
     task_namespaces, invalid_operations = {}, set()
+    reconciled = {}
     issues = []
 
     def related(ref, event, kind=None):
@@ -146,6 +147,10 @@ def audit_trace(log) -> TraceAudit:
                         issues.append(f'{op}: grant constraint violation: {exc}')
                 if p['proposal_digest'] != proposal.payload.get('proposal_digest'):
                     issues.append(f'{op}: dispatch digest mismatch')
+                if proposal.payload['tool'] == 'journal.append' and (
+                    e.schema_version < 3 or not isinstance(p.get('executor_id'), str) or not p['executor_id']
+                ):
+                    issues.append(f'{op}: missing journal store identity')
                 if set(proposal.payload['cited_context_ids']) - evidence.get(op, frozenset()):
                     issues.append(f'{op}: citation outside retrieved set')
                 try:
@@ -162,6 +167,28 @@ def audit_trace(log) -> TraceAudit:
                     (parent.payload['verdict'] == 'allow' or parent.payload['verdict'] == 'escalate' and
                      authorization.get('approved'))):
                 issues.append(f'{op}: no proposal-specific recorded authorization')
+        elif kind == T.ACTION_RECONCILED:
+            from ..contracts import Proposal
+            from ..journal import journal_evidence
+            op = p['operation_id']; dispatch = dispatches.get(op)
+            proposal = related(op, e, T.AGENT_ACTION_PROPOSED)
+            valid = bool(dispatch and related(dispatch.event_id, e) and proposal and
+                         proposal.payload['tool'] == 'journal.append' and
+                         e.causation_id == dispatch.event_id and
+                         p['executor_id'] == dispatch.payload.get('executor_id') and
+                         p['proposal_digest'] == dispatch.payload['proposal_digest'] and
+                         p['grant_id'] == dispatch.payload['grant_id'] and
+                         op not in reconciled and
+                         outcomes.get(op) in {None, T.ACTION_INDETERMINATE})
+            if valid:
+                value = proposal.payload
+                intended = Proposal(value['tool'], value['args'], value['justification'], value['cited_context_ids'])
+                valid = p['evidence'] == journal_evidence(intended, dispatch, p['state'])
+            if valid:
+                reconciled[op] = p['state']
+            else:
+                invalid_operations.add(op)
+                issues.append(f'{op}: invalid reconciliation evidence or binding')
         elif kind in {T.ACTION_EXECUTED, T.ACTION_FAILED, T.ACTION_INDETERMINATE}:
             op = p.get('operation_id'); dispatch = dispatches.get(op)
             valid = e.schema_version >= 2
@@ -176,10 +203,16 @@ def audit_trace(log) -> TraceAudit:
             if op in outcomes:
                 issues.append(f'{op}: duplicate outcome')
                 invalid_operations.add(op)
+            if op in reconciled and (kind == T.ACTION_EXECUTED and reconciled[op] != 'applied' or
+                                     kind == T.ACTION_FAILED and reconciled[op] != 'cancelled'):
+                valid = False
+                invalid_operations.add(op)
+                issues.append(f'{op}: outcome contradicts reconciliation')
             if valid:
                 outcomes[op] = kind
             closed.add(op)
         by_id[e.event_id] = e
     unknown = tuple(sorted(op for op in dispatches
-                           if op in invalid_operations or op not in outcomes or outcomes[op] == T.ACTION_INDETERMINATE))
+                           if op in invalid_operations or op not in reconciled and
+                           (op not in outcomes or outcomes[op] == T.ACTION_INDETERMINATE)))
     return TraceAudit(tuple(issues), unknown)
