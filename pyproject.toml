@@ -26,10 +26,6 @@ embeddings = [
 postgres = [
     "psycopg[binary]>=3.1",
 ]
-# Claude-backed Brain (tenet.agent.claude_brain); needs Anthropic credentials.
-llm = [
-    "anthropic>=1.13",
-]
 # Single-tenant HTTP surface (tenet.api).
 api = [
     "fastapi>=0.110",

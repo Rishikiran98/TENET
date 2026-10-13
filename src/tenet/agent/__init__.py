@@ -5,7 +5,7 @@ every hop evented."""
 from __future__ import annotations
 
 from .brain import Brain, ScriptedBrain
-from .claude_brain import BrainError, ClaudeBrain
+from .llm_brain import BrainError, LLMBrain
 from .loop import AgentLoop, Executor, StepOutcome, TaskResult
 from ..contracts import Proposal, ToolExecutionError, Observation
 
@@ -14,7 +14,7 @@ __all__ = [
     "Observation",
     "Brain",
     "ScriptedBrain",
-    "ClaudeBrain",
+    "LLMBrain",
     "BrainError",
     "AgentLoop",
     "Executor",

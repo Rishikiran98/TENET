@@ -89,15 +89,23 @@ folded from that log. Nothing is authoritative except the log.
   inspects the store: it records `action.reconciled` as *applied* if the report
   committed, or fences the operation as *cancelled* so a late worker can never
   apply it. It never retries the effect, refunds budget or reopens the task.
-- **Claude Brain** (`src/tenet/agent/claude_brain.py`) — the same Brain
-  interface backed by Claude (`claude-opus-5-5`, install the `llm` extra). The
-  system prompt is fixed operator text; retrieved memory and earlier results
-  travel only inside an escaped `<untrusted_data>` block in the user turn, and
-  the model must answer with one strict tool call (one per proposable action, or
-  `finish`). It proposes; the grant and gate still decide. A fooled model is
-  still stopped (tested with a scripted fake client). `evaluation/llm_headline.py`
-  runs the headline demo against the live model when Anthropic credentials are
-  set; no live result is recorded yet.
+- **LLM Brain** (`src/tenet/agent/llm_brain.py`) — the same Brain interface
+  backed by a model you run yourself, free: it speaks the OpenAI-compatible
+  `/chat/completions` protocol with tool calling (Ollama by default; llama.cpp
+  `llama-server`, LM Studio or vLLM by changing `base_url`), using only the
+  standard library. The system message is fixed operator text; retrieved memory
+  and earlier results travel only inside an escaped `<untrusted_data>` block in
+  the user message, and the model must answer with exactly one tool call (one
+  per proposable action, or `finish`); anything else aborts the task. It
+  proposes; the grant and gate still decide. A fooled model is still stopped
+  (tested with a scripted fake transport). To measure a real model:
+
+  ```bash
+  ollama pull qwen2.5:7b
+  PYTHONPATH=src python evaluation/llm_headline.py --runs 10
+  ```
+
+  No live result is recorded yet.
 - **Headline demo + audit view** (`src/tenet/demo/`, `src/tenet/projections/`) —
   a poisoned memory entry tells the agent to delete `/protected/secrets.txt`.
   The same deterministic, deliberately gullible Brain drives a naive RAG agent

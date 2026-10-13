@@ -43,11 +43,12 @@ order of §12; do not build ahead of it.
   uncertain effects. Agent-provided approval text is quoted as untrusted data;
   it can contain relayed memory content. Brains receive immutable observations
   for prior steps. Reads return at most 4 KiB of text to the Brain and log only
-  digest/size metadata. `agent/claude_brain.py::ClaudeBrain` is a Claude-backed
-  Brain (fixed system prompt; retrieved memory and observations only inside an
-  escaped `<untrusted_data>` block; one strict tool call per step). It is tested
-  against a fake client; `evaluation/llm_headline.py` measures it against the
-  live model when credentials exist. No live-model result is recorded yet.
+  digest/size metadata. `agent/llm_brain.py::LLMBrain` is an LLM-backed
+  Brain for any OpenAI-compatible endpoint, Ollama by default, so it runs free on
+  a local model (fixed system message; retrieved memory and observations only
+  inside an escaped `<untrusted_data>` block; exactly one tool call per step). It
+  is tested against a fake transport; `evaluation/llm_headline.py` measures it
+  against a live model server. No live-model result is recorded yet.
 - **Executor:** closed filesystem registry, tool/grant equality checks, repeated
   logical path checks, real-path containment, and rejection of symlink components.
   A logical path outside the grant is denied by the default gate as
@@ -351,9 +352,9 @@ task.initiated (user: task + ScopeGrant)
 retrieved context, and immutable `observations` of prior steps. A deterministic
 adaptive test covers block, failure, and success feedback. Indeterminate effects
 stop continuation and remain visible in TaskResult. No real LLM integration is
-claimed validated. Brains must accept the observations keyword. `ClaudeBrain`
-implements the same interface; a model that gives no usable proposal (refusal,
-no tool call, malformed call) raises `BrainError`, which the loop records as
+claimed validated. Brains must accept the observations keyword. `LLMBrain`
+implements the same interface; a model that gives no usable proposal (no tool
+call, several calls, malformed call, unreachable server) raises `BrainError`, which the loop records as
 `task.aborted`.
 
 **Approver:** CLI, scripted, and fail-safe implementations consume a request
@@ -430,7 +431,7 @@ tenet/
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
   contracts.py     Proposal, Observation, ToolExecutionError
   constraints.py   pure logical constraint validators
-  agent/           proposal.py (compatibility alias), brain.py (scripted), claude_brain.py (LLM), loop.py   ◄── BUILT
+  agent/           proposal.py (compatibility alias), brain.py (scripted), llm_brain.py (local LLM), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
   executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
   api/             app.py (create_app), demo.py (uvicorn factory)   ◄── BUILT
