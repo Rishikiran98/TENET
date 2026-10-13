@@ -10,22 +10,28 @@ task text and the ScopeGrant only. The Brain is chosen by whoever deploys the
 server (``brain_factory``); HTTP callers can never submit proposals. Every
 endpoint maps onto something already evented or derived from the log:
 
-    POST /memory          ingest (memory.raw.appended)
-    POST /tasks           run one task under a fresh grant (task.* ... events)
-    GET  /tasks/{id}/audit   readable why-chain (projections.audit)
-    GET  /audit           hash chain + structural audit of the whole log
+    POST /memory                         ingest (memory.raw.appended)
+    POST /tasks                          start one task under a fresh grant (202)
+    GET  /tasks/{id}                     status, steps, pending approval
+    POST /tasks/{id}/approvals/{ref}     answer an escalation (approval.decided)
+    GET  /tasks/{id}/audit               readable why-chain (projections.audit)
+    GET  /audit                          hash chain + structural audit of the log
 
-There is no approval endpoint: the loop is synchronous, so escalations go to
-the server's approver (fail-safe deny by default). Responses never carry read
-file content; like the log receipts, they carry metadata only.
+Tasks run on worker threads. An ESCALATE verdict waits for the principal to
+answer with the binding of the surface they were shown; a wrong binding is
+refused and the request stays pending. No answer before the timeout or the
+grant's expiry, or a server shutdown, is a deny (see ``api.tasks``). Responses
+never carry read file content; like the log receipts, they carry metadata only.
 """
 
 from __future__ import annotations
 
 import hmac
 import json
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -35,8 +41,9 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from .. import __version__
 from ..agent import AgentLoop, Brain, Executor
 from ..agent.loop import AuditWriteError
-from ..approver import Approver, FailSafeDenyApprover
+from ..approver import Approver
 from ..events import ChainError, new_ulid
+from ..events import taxonomy as T
 from ..events.audit import audit_trace
 from ..gate import DefaultGate, Gate, Policy
 from ..memory import MemoryCore
@@ -44,6 +51,7 @@ from ..memory.core import IngestConflict, ProjectionError
 from ..projections import audit_view, render_audit
 from ..scope import ScopeGrant, ToolGrant
 from ..values import thaw
+from .tasks import ABORTED, COMPLETED, FAILED, HttpApprover, TaskRecord, TaskRegistry
 
 
 def _utf8_json(value: dict) -> dict:
@@ -89,6 +97,12 @@ class TaskRequest(_Strict):
     grant: GrantBody
 
 
+class ApprovalRequest(_Strict):
+    decision: Literal["approve", "reject"]
+    binding: str = Field(min_length=1, max_length=128)  # echo of the surface shown
+    note: str = Field(default="", max_length=1_000)
+
+
 def _summarize(result) -> dict:
     """Bounded, content-free view of a step result for the HTTP response."""
     if not result:
@@ -108,12 +122,27 @@ def create_app(
     principal: str = "operator",
     approver: Approver | None = None,
     gate: Gate | None = None,
+    approval_timeout: float = 300.0,
+    max_workers: int = 4,
+    max_finished_tasks: int = 1000,
 ) -> FastAPI:
-    """Build the app. ``policy`` is required: production policy is Sai's (D8)."""
+    """Build the app. ``policy`` is required: production policy is Sai's (D8).
+
+    Without ``approver``, escalations are answered over HTTP by the principal
+    (``HttpApprover``); pass one (e.g. ``FailSafeDenyApprover``) to opt out.
+    """
     if not isinstance(token, str) or len(token) < 16:
         raise ValueError("token must be a string of at least 16 characters")
+    if (not approval_timeout > 0 or type(max_workers) is not int or max_workers < 1 or
+            type(max_finished_tasks) is not int or max_finished_tasks < 0):
+        raise ValueError("approval_timeout must be positive, max_workers at least 1 "
+                         "and max_finished_tasks non-negative")
+    registry = TaskRegistry(max_finished=max_finished_tasks)
+    approver = approver or HttpApprover(registry, principal=principal,
+                                        approval_timeout=approval_timeout)
     loop = AgentLoop(memory=memory, gate=gate or DefaultGate(), policy=policy,
-                     approver=approver or FailSafeDenyApprover(), executor=executor)
+                     approver=approver, executor=executor)
+    workers = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="tenet-task")
     expected = token.encode("utf-8")
 
     def require_principal(request: Request) -> str:
@@ -125,8 +154,15 @@ def create_app(
 
     # Route dependencies do not cover FastAPI's generated docs, so they are
     # disabled rather than served unauthenticated.
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        registry.close()               # pending escalations are denied, not abandoned
+        workers.shutdown(wait=True)
+
     app = FastAPI(title="Tenet", version=__version__, dependencies=[Depends(require_principal)],
-                  docs_url=None, redoc_url=None, openapi_url=None)
+                  docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+    app.state.tasks = registry  # for operators and tests; holds no read content
 
     @app.exception_handler(RequestValidationError)
     def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -151,8 +187,33 @@ def create_app(
             raise HTTPException(422, str(exc))
         return {"raw_id": raw.raw_id, "content_hash": raw.content_hash}
 
-    @app.post("/tasks")
-    def run_task(body: TaskRequest) -> dict:
+    def _steps(result) -> list[dict]:
+        return [{
+            "tool": s.proposal.tool, "args": thaw(s.proposal.args),
+            "cited_context_ids": list(s.proposal.cited_context_ids),
+            "verdict": s.decision.verdict.value, "rationale": s.observation.rationale,
+            "outcome": s.outcome_event_type, "result": _summarize(s.observation.result),
+            "error": s.observation.error,
+        } for s in result.steps] if result is not None else []
+
+    def run(record: TaskRecord, body: TaskRequest, grant: ScopeGrant) -> None:
+        try:
+            result = loop.run_task(task=body.task, grant=grant, brain=brain_factory(),
+                                   namespace=body.namespace)
+        except AuditWriteError as exc:
+            registry.finish(record.task_id, status=FAILED, operation_id=exc.operation_id,
+                            error="effect may have occurred without a receipt")
+        except Exception as exc:  # the loop has already logged task.aborted
+            registry.finish(record.task_id, status=FAILED,
+                            error=f"task aborted: {type(exc).__name__}")
+        else:
+            summary = {"completed": result.completed, "reason": result.reason,
+                       "steps": _steps(result)}   # read text is dropped here
+            registry.finish(record.task_id, summary=summary,
+                            status=COMPLETED if result.completed else ABORTED)
+
+    @app.post("/tasks", status_code=status.HTTP_202_ACCEPTED)
+    def start_task(body: TaskRequest) -> dict:
         try:
             grant = ScopeGrant.issue(
                 principal=principal, task_id=new_ulid(), namespaces=set(body.grant.namespaces),
@@ -160,28 +221,61 @@ def create_app(
                 max_actions=body.grant.max_actions, ttl_seconds=body.grant.ttl_seconds)
         except ValueError as exc:
             raise HTTPException(422, f"invalid grant: {exc}")
-        try:
-            result = loop.run_task(task=body.task, grant=grant, brain=brain_factory(),
-                                   namespace=body.namespace)
-        except AuditWriteError as exc:
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                {"error": "effect may have occurred without a receipt",
-                                 "task_id": grant.task_id, "operation_id": exc.operation_id})
-        except Exception as exc:
-            raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                {"error": f"task aborted: {type(exc).__name__}",
-                                 "task_id": grant.task_id})
+        if registry.closing:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "server shutting down")
+        record = TaskRecord(grant.task_id, grant.grant_id)
+        registry.add(record)
+        workers.submit(run, record, body, grant)
+        return {"task_id": grant.task_id, "grant_id": grant.grant_id, "status": record.status}
+
+    def _from_log(task_id: str) -> dict:
+        """A task this process is not running (e.g. started before a restart)."""
+        started, ending = False, None
+        for event in memory.log:
+            if event.correlation_id == task_id:
+                started = started or event.event_type == T.TASK_INITIATED
+                if event.event_type in (T.TASK_COMPLETED, T.TASK_ABORTED):
+                    ending = event
+        if not started:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown task")
+        if ending is None:
+            return {"task_id": task_id, "status": "interrupted", "completed": False,
+                    "reason": "no terminal event; not running in this server process"}
+        done = ending.event_type == T.TASK_COMPLETED
+        return {"task_id": task_id, "status": COMPLETED if done else ABORTED, "completed": done,
+                "reason": ending.payload.get("summary") or ending.payload.get("reason", "")}
+
+    @app.get("/tasks/{task_id}")
+    def task_status(task_id: str) -> dict:
+        record = registry.get(task_id)
+        if record is None:
+            return {**_from_log(task_id), "steps": [], "pending_approval": None}
+        with registry.lock:
+            pending = record.pending.surface if record.pending else None
+            status_, summary = record.status, record.summary or {}
+            error, operation_id = record.error, record.operation_id
         return {
-            "task_id": result.task_id, "grant_id": grant.grant_id,
-            "completed": result.completed, "reason": result.reason,
-            "steps": [{
-                "tool": s.proposal.tool, "args": thaw(s.proposal.args),
-                "cited_context_ids": list(s.proposal.cited_context_ids),
-                "verdict": s.decision.verdict.value, "rationale": s.observation.rationale,
-                "outcome": s.outcome_event_type, "result": _summarize(s.observation.result),
-                "error": s.observation.error,
-            } for s in result.steps],
+            "task_id": task_id, "grant_id": record.grant_id, "status": status_,
+            "completed": bool(summary.get("completed")),
+            "reason": summary.get("reason"),
+            "error": error, "operation_id": operation_id,
+            "steps": summary.get("steps", []),
+            "pending_approval": None if pending is None else {
+                "proposal_ref": pending.proposal_ref, "binding": pending.binding,
+                "tool": pending.tool, "args": thaw(pending.args),
+                "expires_at": pending.expires_at, "surface": pending.render()},
         }
+
+    @app.post("/tasks/{task_id}/approvals/{proposal_ref}")
+    def answer_approval(task_id: str, proposal_ref: str, body: ApprovalRequest) -> dict:
+        outcome = registry.answer(task_id, proposal_ref, approved=body.decision == "approve",
+                                  binding=body.binding, note=body.note)
+        if outcome == "missing":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no pending approval for this proposal")
+        if outcome == "binding-mismatch":
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                "binding does not match the pending approval; it stays pending")
+        return {"task_id": task_id, "proposal_ref": proposal_ref, "decision": body.decision}
 
     @app.get("/tasks/{task_id}/audit")
     def task_audit(task_id: str) -> dict:

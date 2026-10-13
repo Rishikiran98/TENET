@@ -43,7 +43,12 @@ order of §12; do not build ahead of it.
   uncertain effects. Agent-provided approval text is quoted as untrusted data;
   it can contain relayed memory content. Brains receive immutable observations
   for prior steps. Reads return at most 4 KiB of text to the Brain and log only
-  digest/size metadata. No real LLM integration has been evaluated.
+  digest/size metadata. `agent/llm_brain.py::LLMBrain` is an LLM-backed
+  Brain for any OpenAI-compatible endpoint, Ollama by default, so it runs free on
+  a local model (fixed system message; retrieved memory and observations only
+  inside an escaped `<untrusted_data>` block; exactly one tool call per step). It
+  is tested against a fake transport; `evaluation/llm_headline.py` measures it
+  against a live model server. No live-model result is recorded yet.
 - **Executor:** closed filesystem registry, tool/grant equality checks, repeated
   logical path checks, real-path containment, and rejection of symlink components.
   A logical path outside the grant is denied by the default gate as
@@ -347,7 +352,10 @@ task.initiated (user: task + ScopeGrant)
 retrieved context, and immutable `observations` of prior steps. A deterministic
 adaptive test covers block, failure, and success feedback. Indeterminate effects
 stop continuation and remain visible in TaskResult. No real LLM integration is
-claimed validated. Brains must accept the observations keyword.
+claimed validated. Brains must accept the observations keyword. `LLMBrain`
+implements the same interface; a model that gives no usable proposal (no tool
+call, several calls, malformed call, unreachable server) raises `BrainError`, which the loop records as
+`task.aborted`.
 
 **Approver:** CLI, scripted, and fail-safe implementations consume a request
 bound to the proposal occurrence, task, grant, policy version, and expiry.
@@ -423,7 +431,7 @@ tenet/
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
   contracts.py     Proposal, Observation, ToolExecutionError
   constraints.py   pure logical constraint validators
-  agent/           proposal.py (compatibility alias), brain.py (scripted), loop.py   ◄── BUILT
+  agent/           proposal.py (compatibility alias), brain.py (scripted), llm_brain.py (local LLM), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
   executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
   api/             app.py (create_app), demo.py (uvicorn factory)   ◄── BUILT
@@ -453,8 +461,18 @@ HTTP (step 9): `api/app.py::create_app` is a single-tenant FastAPI surface for
 the trusted principal, gated by one bearer token (the server refuses to start
 without a 16+ character token). Task requests carry task text and a grant only;
 the Brain is chosen at deployment, so HTTP callers cannot submit proposals.
-Escalations go to the server's approver (fail-safe deny by default); there is
-no approval endpoint. Responses omit read file content. Generated docs
+Tasks run on worker threads: `POST /tasks` returns 202 and `GET /tasks/{id}`
+reports status. An ESCALATE verdict waits for the principal to answer at
+`POST /tasks/{id}/approvals/{proposal_ref}` with the binding of the surface they
+were shown (`api/tasks.py::HttpApprover`); a wrong binding is refused and stays
+pending. No answer before `approval_timeout` or the grant's expiry, or a server
+shutdown, is a deny. The loop, events and audit are unchanged: the decision
+lands in the existing `approval.decided` event. Pending approvals and running
+tasks live in process memory; after a restart such a task reports
+`interrupted` (no effect is uncertain: dispatch follows the decision).
+Finished tasks keep only a content-free summary, and at most
+`max_finished_tasks` (default 1000) are kept; older ones are served from the log.
+Responses omit read file content. Generated docs
 (`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
 cover them.
 
