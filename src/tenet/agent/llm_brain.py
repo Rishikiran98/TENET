@@ -29,6 +29,7 @@ Uses only the standard library. Tests inject a fake transport.
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -165,7 +166,7 @@ class LLMBrain:
                              {"role": "user", "content": user}]}
         try:
             response = self._transport(self._url, body, self._headers)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
             # No proposal means no action: the task aborts, nothing runs.
             raise BrainError(f"model endpoint failed: {exc}") from exc
         self.last_response = response
@@ -183,6 +184,8 @@ class LLMBrain:
             data = json.loads(raw) if isinstance(raw, str) else raw
         except (KeyError, TypeError, ValueError) as exc:
             raise BrainError(f"malformed tool call: {exc}") from exc
+        if not isinstance(name, str):
+            raise BrainError("malformed tool call: name is not a string")
         if name == "finish":
             return None
         if name not in ACTIONS:

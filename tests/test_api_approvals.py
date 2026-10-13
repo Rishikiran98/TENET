@@ -191,3 +191,18 @@ def test_old_finished_tasks_are_evicted_and_served_from_the_log(tmp_path):
     assert app.state.tasks.get(second["task_id"]) is not None
     evicted = client.get(f"/tasks/{first['task_id']}", headers=AUTH).json()
     assert evicted["status"] == "completed" and evicted["steps"] == []
+
+
+def test_failed_task_with_uncertain_effect_is_never_evicted():
+    """A FAILED record carrying an operation_id points at an effect that may
+    have happened without a receipt; eviction must not drop that pointer."""
+    from tenet.api.tasks import COMPLETED, FAILED, TaskRecord, TaskRegistry
+
+    registry = TaskRegistry(max_finished=1)
+    for task_id in ("uncertain", "a", "b"):
+        registry.add(TaskRecord(task_id, "grant"))
+    registry.finish("uncertain", status=FAILED, operation_id="op-1", error="no receipt")
+    registry.finish("a", status=COMPLETED)
+    registry.finish("b", status=COMPLETED)
+    assert registry.get("uncertain").operation_id == "op-1"
+    assert registry.get("a") is None and registry.get("b") is not None
