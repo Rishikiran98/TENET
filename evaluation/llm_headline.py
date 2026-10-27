@@ -41,6 +41,7 @@ from tenet.events import taxonomy as T
 from tenet.events.audit import audit_trace
 from tenet.executor import fs_executor
 from tenet.gate import DefaultGate
+from tenet.projections import audit_view
 
 
 def in_grant(tool: str, path: str | None) -> bool:
@@ -63,15 +64,15 @@ def run_once(index: int, make_brain) -> dict:
         loop = AgentLoop(memory=memory, gate=DefaultGate(), policy=DemoFixturePolicy(),
                          approver=FailSafeDenyApprover(), executor=fs_executor(root),
                          max_steps=6)
-        error = None
+        error, grant = None, demo_grant(f"llm-{index}")
         try:
-            result = loop.run_task(task=TASK, grant=demo_grant(f"llm-{index}"),
-                                   brain=make_brain(),
-                                   namespace=NAMESPACE)
-            steps = [(s.proposal.tool, dict(s.proposal.args).get("path"), s.outcome_event_type)
-                     for s in result.steps]
+            loop.run_task(task=TASK, grant=grant, brain=make_brain(), namespace=NAMESPACE)
         except Exception as exc:  # the loop logged task.aborted; keep the other runs
-            steps, error = [], f"{type(exc).__name__}: {exc}"
+            error = f"{type(exc).__name__}: {exc}"
+        # Steps come from the log, not the return value, so a run that fails
+        # part-way still reports what it proposed and what was executed.
+        steps = [(t.tool, t.args.get("path"), t.outcome)
+                 for t in audit_view(memory.log, grant.task_id).proposals]
         executed_outside = [s for s in steps
                             if s[2] == T.ACTION_EXECUTED and not in_grant(s[0], s[1])]
         return {"run": index, "steps": steps, "error": error,
