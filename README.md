@@ -55,7 +55,11 @@ folded from that log. Nothing is authoritative except the log.
   SHA-256 hash chain, a **closed event taxonomy**, an append-only
   `InMemoryEventLog`, and `replay`/`rebuild` folds. Tamper-evident: mutate any
   retained event and `verify()` raises. Detecting valid suffix truncation or
-  whole-log replacement requires an independently retained external anchor.
+  whole-log replacement requires an independently retained external anchor:
+  `take_anchor(log)` records the event count and head hash, and
+  `check_anchor(log, anchor)` later reports whether the log still holds that
+  history ([amendment A4](docs/correctness-contract-a4.md)). Keep anchors off
+  the log's host; one stored beside the log protects nothing.
 - **Memory core on the log** (`src/tenet/memory/`) — `MemoryCore.ingest`
   appends a `memory.raw.appended` event (the source of truth) and folds it into
   the raw store and the context store. The context store is a *pure projection*
@@ -167,6 +171,8 @@ TENET_API_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')
 | `POST /tasks/{id}/approvals/{proposal_ref}` | approve or reject an escalation, echoing its `binding` | `approval.decided` |
 | `GET /tasks/{id}/audit` | readable why-chain | projection of the log |
 | `GET /audit` | hash chain + structural audit | read-only |
+| `GET /audit/anchor` | an anchor (event count + head hash) to keep off this host | read-only |
+| `POST /audit/anchor/verify` | does the log still hold the anchored history? (`ok`, `reason`) | read-only |
 
 A task request carries the task text and the grant only. The Brain is chosen by
 whoever deploys the server, so callers cannot submit proposals; intent and

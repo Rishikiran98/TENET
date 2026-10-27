@@ -1,7 +1,8 @@
 # TENET — Architecture & Design (v1, Final)
 
-**October 2026 amendments:** [A1](docs/correctness-contract.md) and
-[A2](docs/correctness-contract-a2.md)
+**October 2026 amendments:** [A1](docs/correctness-contract.md),
+[A2](docs/correctness-contract-a2.md) and
+[A4](docs/correctness-contract-a4.md) (external log anchors)
 supersede conflicting guarantees below, including read expiry, one-use task
 registration, approval binding, immutable payloads and failure/replay semantics.
 It records the changes authorized by the correctness action plan.
@@ -26,7 +27,10 @@ order of §12; do not build ahead of it.
 - **Events:** immutable envelopes, a closed 16-type taxonomy, synchronized
   `InMemoryEventLog`, durable `SQLiteEventLog`, replay, and a structural audit
   in `events/audit.py`. A hash chain cannot detect valid suffix truncation or
-  wholesale replacement without an independently retained anchor.
+  wholesale replacement without an independently retained anchor;
+  `events/anchor.py` provides one (A4): `take_anchor` records the event count
+  and head, and `check_anchor` later reports whether the log still holds that
+  history. The anchor must be kept off the log's host.
 - **Memory:** raw ingestion, optional idempotency keys, deterministic context
   projections, and atomic verified rebuilds. Retrieval enforces namespace and
   expiry before ranking. Construction on an existing log performs verified
@@ -158,7 +162,8 @@ class Actor:
 retrieval caused by task). `prev_hash` makes the log tamper-evident — cheap to
 implement, disproportionately valuable in the security story: any mutation of
 history breaks the chain from that point forward. This does not detect removal
-of a valid suffix or replacement of the whole chain without an external anchor.
+of a valid suffix or replacement of the whole chain without an external anchor;
+amendment A4 adds one (`events/anchor.py`), which the principal stores off-host.
 
 ### 3.2 Event taxonomy (closed set for v1)
 
@@ -434,7 +439,7 @@ and corrections-as-new-events (history never edited).
 
 ```
 tenet/
-  events/          envelope.py, taxonomy.py, log.py, sqlite.py, replay.py, audit.py   ◄── BUILT
+  events/          envelope.py, taxonomy.py, log.py, sqlite.py, replay.py, audit.py, anchor.py   ◄── BUILT
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py, pgvector.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
@@ -483,7 +488,9 @@ Finished tasks keep only a content-free summary, and at most
 `max_finished_tasks` (default 1000) are kept; older ones are served from the log.
 Responses omit read file content. Generated docs
 (`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
-cover them.
+cover them. `GET /audit/anchor` returns an anchor to store off-host, and
+`POST /audit/anchor/verify` checks one (A4); a failed check is 200 with
+`ok: false`, a malformed anchor 422.
 
 ---
 

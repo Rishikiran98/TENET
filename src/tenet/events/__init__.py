@@ -18,9 +18,14 @@ from .envelope import (
 from .log import ChainError, EventLog, InMemoryEventLog
 from .sqlite import SQLiteEventLog
 from .replay import Reducer, rebuild, replay
+from .anchor import Anchor, AnchorCheck, check_anchor, take_anchor
 from . import taxonomy
 
 __all__ = [
+    "Anchor",
+    "AnchorCheck",
+    "take_anchor",
+    "check_anchor",
     "Actor",
     "Event",
     "GENESIS_HASH",
