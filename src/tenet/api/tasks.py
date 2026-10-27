@@ -66,8 +66,11 @@ class TaskRegistry:
             for name, value in changes.items():
                 setattr(record, name, value)
             # Bound memory: drop the oldest finished records. Their status is
-            # still served from the event log by GET /tasks/{id}.
-            finished = [t for t, r in self._records.items() if r.status in (COMPLETED, ABORTED, FAILED)]
+            # still served from the event log by GET /tasks/{id}. A record with
+            # an operation_id is kept: it points at an effect that may have
+            # happened without a receipt, which the log alone cannot show.
+            finished = [t for t, r in self._records.items()
+                        if r.status in (COMPLETED, ABORTED, FAILED) and r.operation_id is None]
             for old in finished[:max(0, len(finished) - self._max_finished)]:
                 del self._records[old]
 

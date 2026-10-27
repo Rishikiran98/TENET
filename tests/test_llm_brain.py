@@ -1,6 +1,7 @@
 """LLMBrain: request shape, data/instruction separation, and that the gate
 still decides. A fake transport stands in for the model server; no network."""
 
+import http.client
 import json
 import urllib.error
 
@@ -110,6 +111,9 @@ def test_tool_calls_map_to_proposals():
     tool_turn(call("fs_read", path="/x", justification="", cited_context_ids=[3])),
     tool_turn({"type": "function", "function": {"name": "fs_read", "arguments": "{not json"}}),
     urllib.error.URLError("connection refused"),
+    http.client.IncompleteRead(b""),                                  # truncated body
+    tool_turn({"type": "function", "function": {"name": ["fs_read"], "arguments": "{}"}}),
+    tool_turn({"type": "function", "function": {"name": {"n": 1}, "arguments": "{}"}}),
 ])
 def test_unusable_responses_raise(response):
     with pytest.raises(BrainError):
