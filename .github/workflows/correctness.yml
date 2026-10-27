@@ -1,0 +1,177 @@
+name: Correctness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core:
+    name: Core correctness / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install core, API and test dependencies
+        run: python -m pip install -e '.[api,dev]'
+      - name: Run core tests
+        run: python -m pytest tests --ignore=tests/test_pgvector.py -ra --junitxml=core-results.xml
+      - name: Reject skipped core tests
+        if: always()
+        run: |
+          python -c '
+          import pathlib, sys, xml.etree.ElementTree as ET
+          p = pathlib.Path("core-results.xml")
+          if not p.exists():
+              sys.exit("Core test report missing")
+          cases = ET.parse(p).getroot().findall(".//testcase")
+          skipped = [(c.get("classname"), c.get("name"))
+                     for c in cases if c.find("skipped") is not None]
+          print(f"Core test cases: {len(cases)}; skipped: {len(skipped)}")
+          for case in skipped:
+              print("SKIPPED:", *case)
+          if not cases or skipped:
+              sys.exit("Core coverage incomplete")
+          '
+      - name: Run deterministic comparisons
+        shell: bash
+        run: |
+          set -euo pipefail
+          python evaluation/compare.py --system repaired > compare.json
+          python evaluation/crash_boundary.py > crash.json
+          python evaluation/recovery_compare.py > recovery.json
+          python -c '
+          import json
+
+          def load(path):
+              with open(path, encoding="utf-8") as f:
+                  return json.load(f)
+
+          compare = load("compare.json")
+          expected = {
+              "allowed_write", "outside_grant", "budget",
+              "stale_approval", "approval_expiry", "prefix_symlink",
+              "tool_grant_mismatch", "task_reuse", "unknown_citation",
+          }
+          cases = compare["cases"]
+          assert compare["system"] == "repaired"
+          assert len(cases) == 9 and {c["case"] for c in cases} == expected
+          assert all(c["passed"] is True and c["unexpected_error"] is None
+                     for c in cases)
+
+          crash = load("crash.json")
+          expected_crash = {
+              (system, phase)
+              for system in ("repaired", "conventional")
+              for phase in ("before_effect", "after_effect")
+          }
+          assert len(crash) == 4
+          assert {(c["system"], c["phase"]) for c in crash} == expected_crash
+          assert all(c["passed"] is True for c in crash)
+
+          recovery = load("recovery.json")
+          phases = {
+              "none", "before_dispatch_commit", "after_dispatch_commit",
+              "after_effect", "during_reconciliation", "after_reconciliation",
+          }
+          expected_recovery = {
+              (system, phase)
+              for system in ("tenet", "conventional")
+              for phase in phases
+          }
+          cases = recovery["cases"]
+          assert len(cases) == 12
+          assert {(c["system"], c["crash"]) for c in cases} == expected_recovery
+          assert all(c["passed"] is True for c in cases)
+          print("Comparisons passed: repaired 9/9, crash 4/4, recovery 6/6 per system")
+          '
+      - name: Publish reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-results-python-${{ matrix.python }}
+          if-no-files-found: warn
+          path: |
+            core-results.xml
+            compare.json
+            crash.json
+            recovery.json
+
+  pgvector:
+    name: Postgres / pgvector
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tenet
+          POSTGRES_PASSWORD: tenet
+          POSTGRES_DB: tenet_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tenet -d tenet_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TENET_PG_DSN: "postgresql://tenet:tenet@localhost:5432/tenet_test"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Postgres and test dependencies
+        run: python -m pip install -e '.[postgres,dev]'
+      - name: Verify database and vector extension
+        run: |
+          python -c '
+          import os, psycopg
+          with psycopg.connect(os.environ["TENET_PG_DSN"], autocommit=True) as conn:
+              conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
+              print("Postgres:", conn.execute("SHOW server_version").fetchone()[0])
+              print("pgvector:", conn.execute(
+                  "SELECT extversion FROM pg_extension WHERE extname = %s",
+                  ("vector",)
+              ).fetchone()[0])
+          '
+      - name: Run pgvector integration tests
+        run: python -m pytest tests/test_pgvector.py -ra --junitxml=pgvector-results.xml
+      - name: Reject skipped pgvector tests
+        if: always()
+        run: |
+          python -c '
+          import pathlib, sys, xml.etree.ElementTree as ET
+          p = pathlib.Path("pgvector-results.xml")
+          if not p.exists():
+              sys.exit("pgvector test report missing")
+          cases = ET.parse(p).getroot().findall(".//testcase")
+          skipped = [(c.get("classname"), c.get("name"))
+                     for c in cases if c.find("skipped") is not None]
+          print(f"pgvector test cases: {len(cases)}; skipped: {len(skipped)}")
+          for case in skipped:
+              print("SKIPPED:", *case)
+          if not cases or skipped:
+              sys.exit("pgvector coverage incomplete")
+          '
+      - name: Publish report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pgvector-results
+          if-no-files-found: warn
+          path: pgvector-results.xml
