@@ -16,6 +16,8 @@ endpoint maps onto something already evented or derived from the log:
     POST /tasks/{id}/approvals/{ref}     answer an escalation (approval.decided)
     GET  /tasks/{id}/audit               readable why-chain (projections.audit)
     GET  /audit                          hash chain + structural audit of the log
+    GET  /audit/anchor                   an anchor to keep off this host (A4)
+    POST /audit/anchor/verify            does the log still hold an anchored history?
 
 Tasks run on worker threads. An ESCALATE verdict waits for the principal to
 answer with the binding of the surface they were shown; a wrong binding is
@@ -36,13 +38,13 @@ from typing import Annotated, Callable, Literal
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from .. import __version__
 from ..agent import AgentLoop, Brain, Executor
 from ..agent.loop import AuditWriteError
 from ..approver import Approver
-from ..events import ChainError, new_ulid
+from ..events import Anchor, ChainError, check_anchor, new_ulid, take_anchor
 from ..events import taxonomy as T
 from ..events.audit import audit_trace
 from ..gate import DefaultGate, Gate, Policy
@@ -103,13 +105,20 @@ class ApprovalRequest(_Strict):
     note: str = Field(default="", max_length=1_000)
 
 
+class AnchorBody(_Strict):
+    """An anchor the principal kept off this host (A4). Strict types: no coercion."""
+    events: StrictInt
+    event_id: StrictStr = Field(max_length=64)
+    head_hash: StrictStr = Field(max_length=64)
+
+
 def _summarize(result) -> dict:
     """Bounded, content-free view of a step result for the HTTP response."""
     if not result:
         return {}
     return {k: v for k, v in result.items()
             if k in ("path", "bytes_returned", "bytes_written", "deleted",
-                     "content_sha256", "truncated")}
+                     "content_sha256", "truncated", "namespace", "raw_id", "content_hash")}
 
 
 def create_app(
@@ -284,6 +293,24 @@ def create_app(
         except KeyError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown task")
         return {"audit": asdict(view), "rendered": render_audit(view)}
+
+    @app.get("/audit/anchor")
+    def audit_anchor() -> dict:
+        """Record this off the host; later, POST it back to /audit/anchor/verify."""
+        try:
+            return take_anchor(memory.log).to_dict()
+        except ChainError as exc:
+            return JSONResponse(status_code=status.HTTP_409_CONFLICT,
+                                content={"chain_verified": False, "error": str(exc)})
+
+    @app.post("/audit/anchor/verify")
+    def verify_anchor(body: AnchorBody) -> dict:
+        try:
+            anchor = Anchor.from_dict(body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(422, f"invalid anchor: {exc}")
+        check = check_anchor(memory.log, anchor)  # a failed check is a result, not an error
+        return {"ok": check.ok, "reason": check.reason}
 
     @app.get("/audit")
     def log_audit() -> dict:

@@ -63,8 +63,10 @@ Custom Brains must accept the observations keyword. Tool output is untrusted.
 Indeterminate effects still stop execution and tasks are never resumed. Since
 A3, only `journal.append` dispatches can be reconciled (`reconcile_journal`);
 ordinary filesystem effects remain unresolved. Native Windows, a real LLM, and production-scale concurrent
-workloads were not evaluated. External anchoring, hostile-host isolation, and
-hard-link provenance remain outside the contract.
+workloads were not evaluated. Hostile-host isolation and hard-link provenance
+remain outside the contract. Amendment A4 adds external log anchors, which
+detect suffix truncation and wholesale replacement; storing them off-host is
+the operator's responsibility.
 
 Incremental loading assumes normal append-only writers. Explicit verification
 rereads historical database rows, but cannot detect valid suffix removal or whole

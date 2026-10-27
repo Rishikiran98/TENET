@@ -78,6 +78,7 @@ ACTIONS = {
     "fs_write": ("fs.write", ("path", "content")),
     "fs_delete": ("fs.delete", ("path",)),
     "journal_append": ("journal.append", ("journal", "content")),
+    "memory_write": ("memory.write", ("namespace", "content")),
 }
 _PATH = {"type": "string", "description": "Logical sandbox path, e.g. /project/notes.md"}
 TOOLS = [
@@ -87,6 +88,8 @@ TOOLS = [
     _tool("fs_delete", "Delete a file in the sandbox.", {"path": _PATH}),
     _tool("journal_append", "Append a report to a named journal.",
           {"journal": {"type": "string"}, "content": {"type": "string"}}),
+    _tool("memory_write", "Save a short note to a memory namespace for later tasks.",
+          {"namespace": {"type": "string"}, "content": {"type": "string"}}),
     {"type": "function", "function": {
         "name": "finish", "description": "The task is done, or no permitted action can advance it.",
         "parameters": {"type": "object", "properties": {"summary": {"type": "string"}},

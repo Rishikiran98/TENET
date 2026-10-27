@@ -1,7 +1,8 @@
 # TENET — Architecture & Design (v1, Final)
 
-**October 2026 amendments:** [A1](docs/correctness-contract.md) and
-[A2](docs/correctness-contract-a2.md)
+**October 2026 amendments:** [A1](docs/correctness-contract.md),
+[A2](docs/correctness-contract-a2.md) and
+[A4](docs/correctness-contract-a4.md) (external log anchors)
 supersede conflicting guarantees below, including read expiry, one-use task
 registration, approval binding, immutable payloads and failure/replay semantics.
 It records the changes authorized by the correctness action plan.
@@ -26,7 +27,10 @@ order of §12; do not build ahead of it.
 - **Events:** immutable envelopes, a closed 16-type taxonomy, synchronized
   `InMemoryEventLog`, durable `SQLiteEventLog`, replay, and a structural audit
   in `events/audit.py`. A hash chain cannot detect valid suffix truncation or
-  wholesale replacement without an independently retained anchor.
+  wholesale replacement without an independently retained anchor;
+  `events/anchor.py` provides one (A4): `take_anchor` records the event count
+  and head, and `check_anchor` later reports whether the log still holds that
+  history. The anchor must be kept off the log's host.
 - **Memory:** raw ingestion, optional idempotency keys, deterministic context
   projections, and atomic verified rebuilds. Retrieval enforces namespace and
   expiry before ranking. Construction on an existing log performs verified
@@ -49,7 +53,8 @@ order of §12; do not build ahead of it.
   inside an escaped `<untrusted_data>` block; exactly one tool call per step). It
   is tested against a fake transport; `evaluation/llm_headline.py` measures it
   against a live model server. No live-model result is recorded yet.
-- **Executor:** closed filesystem registry, tool/grant equality checks, repeated
+- **Executor:** closed registry (filesystem tools, plus opt-in gated
+  `memory.write` per §7), tool/grant equality checks, repeated
   logical path checks, real-path containment, and rejection of symlink components.
   A logical path outside the grant is denied by the default gate as
   `action.blocked`, without consuming action budget. Filesystem state violations
@@ -157,7 +162,8 @@ class Actor:
 retrieval caused by task). `prev_hash` makes the log tamper-evident — cheap to
 implement, disproportionately valuable in the security story: any mutation of
 history breaks the chain from that point forward. This does not detect removal
-of a valid suffix or replacement of the whole chain without an external anchor.
+of a valid suffix or replacement of the whole chain without an external anchor;
+amendment A4 adds one (`events/anchor.py`), which the principal stores off-host.
 
 ### 3.2 Event taxonomy (closed set for v1)
 
@@ -365,14 +371,22 @@ relay memory content. These labels do not prevent human persuasion.
 **Agent memory writes:** if the agent wants to persist something, that is a
 *gated action* (`memory.write` must appear in the ScopeGrant and pass the
 gate), not a trusted framework event. Agents earn writes; frameworks don't
-gift them.
+gift them. *Implemented* (`executor/memory_tools.py`): the grant's constraint
+names the one namespace the tool may write (`{"namespace": ...}`, required),
+arguments are exactly `namespace` and `content` (non-empty, at most 4 KiB), and
+the deployment must register the tool (`fs_executor(root, memory=...)`). The
+write is an ordinary `memory.raw.appended` event with actor `tool:memory.write`
+and source `agent:memory.write`; the receipt names its `raw_id`. Later tasks
+retrieve it as data. No policy rule confers it, so under D7 it is denied until
+Sai's policy does.
 
 ---
 
 ## 8. Executor and tools
 
-- Closed tool registry; v1 ships file-ops only (`fs.read`, `fs.write`,
-  `fs.delete`) rooted in a sandbox directory. Constraint enforcement
+- Closed tool registry; v1 ships file-ops (`fs.read`, `fs.write`,
+  `fs.delete`) rooted in a sandbox directory, plus `memory.write` when the
+  deployment registers it (§7). Constraint enforcement
   (path-prefix, etc.) happens *again* at the executor — defense in depth; the
   executor does not trust that the gate was the only path to it.
 - Outcome receipts are appended as events. Read text is omitted; its bounded
@@ -425,7 +439,7 @@ and corrections-as-new-events (history never edited).
 
 ```
 tenet/
-  events/          envelope.py, taxonomy.py, log.py, sqlite.py, replay.py, audit.py   ◄── BUILT
+  events/          envelope.py, taxonomy.py, log.py, sqlite.py, replay.py, audit.py, anchor.py   ◄── BUILT
   memory/          rawstore.py, contextualizer.py, contextstore.py, retriever.py, embedder.py, core.py, models.py, pgvector.py   ◄── BUILT
   scope/           grant.py (ScopeGrant, ToolGrant)   ◄── BUILT
   gate/            contract.py (Protocol, Verdict, GateDecision)  ◄── BUILT | policy.py  ◄── SAI WRITES
@@ -433,7 +447,7 @@ tenet/
   constraints.py   pure logical constraint validators
   agent/           proposal.py (compatibility alias), brain.py (scripted), llm_brain.py (local LLM), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
-  executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
+  executor/        registry.py, fs_tools.py (sandboxed), memory_tools.py (memory.write)   ◄── BUILT
   api/             app.py (create_app), demo.py (uvicorn factory)   ◄── BUILT
   projections/     audit.py (readable why-chain view)   ◄── BUILT | steps.py (not needed yet)
   demo/            naive_agent.py, tenet_agent.py, brain.py (GullibleBrain), policy.py (DEMO FIXTURE),
@@ -474,7 +488,9 @@ Finished tasks keep only a content-free summary, and at most
 `max_finished_tasks` (default 1000) are kept; older ones are served from the log.
 Responses omit read file content. Generated docs
 (`/docs`, `/redoc`, `/openapi.json`) are disabled: route dependencies do not
-cover them.
+cover them. `GET /audit/anchor` returns an anchor to store off-host, and
+`POST /audit/anchor/verify` checks one (A4); a failed check is 200 with
+`ok: false`, a malformed anchor 422.
 
 ---
 

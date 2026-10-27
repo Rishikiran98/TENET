@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 import re
 
 FILESYSTEM_TOOLS = frozenset({'fs.read', 'fs.write', 'fs.delete'})
+MEMORY_WRITE_LIMIT = 4096  # bytes an agent may persist per write
 
 
 class ConstraintViolation(ValueError):
@@ -47,6 +48,23 @@ def check_constraints(tool, args, constraints):
                 raise ConstraintViolation('journal content must be UTF-8 text of at most 4096 bytes')
         except UnicodeError as exc:
             raise ConstraintViolation('invalid journal UTF-8') from exc
+        return
+    if tool == 'memory.write':
+        # An agent memory write is a gated action (§7): exact arguments, and the
+        # grant names the one namespace it may write. Nothing is inherited.
+        if set(args) != {'namespace', 'content'} or set(constraints) != {'namespace'}:
+            raise ConstraintViolation('memory write requires exact arguments and namespace constraint')
+        name = args['namespace']
+        if not isinstance(name, str) or not 0 < len(name) <= 256:
+            raise ConstraintViolation('invalid memory namespace')
+        if name != constraints['namespace']:
+            raise ConstraintViolation('memory namespace outside grant')
+        try:
+            if not isinstance(args['content'], str) or not 0 < len(args['content'].encode('utf-8')) <= MEMORY_WRITE_LIMIT:
+                raise ConstraintViolation(
+                    f'memory content must be non-empty UTF-8 text of at most {MEMORY_WRITE_LIMIT} bytes')
+        except UnicodeError as exc:
+            raise ConstraintViolation('invalid memory UTF-8') from exc
         return
     if tool not in FILESYSTEM_TOOLS:
         if tool.startswith('fs.'):

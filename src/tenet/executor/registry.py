@@ -58,10 +58,19 @@ class RegistryExecutor:
         return tool.execute(proposal.args, tool_grant.constraints)
 
 
-def fs_executor(sandbox_root: str | Path) -> RegistryExecutor:
-    """The v1 executor: the three file tools, jailed to ``sandbox_root``."""
+def fs_executor(sandbox_root: str | Path, *, memory=None) -> RegistryExecutor:
+    """The v1 executor: the three file tools, jailed to ``sandbox_root``.
+
+    Passing ``memory`` (a ``MemoryCore``) also registers ``memory.write``. It is
+    opt-in: without it the tool is absent from the closed registry, and even
+    with it a write still needs a grant that names the namespace and a gate
+    that allows it.
+    """
     fs = SandboxedFs(sandbox_root)
     registry = ToolRegistry()
     for tool in (FsRead(fs), FsWrite(fs), FsDelete(fs)):
         registry.register(tool)
+    if memory is not None:
+        from .memory_tools import MemoryWrite
+        registry.register(MemoryWrite(memory))
     return RegistryExecutor(registry)
