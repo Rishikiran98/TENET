@@ -6,6 +6,7 @@ to it."""
 from __future__ import annotations
 
 from .fs_tools import FsDelete, FsRead, FsWrite, SandboxedFs, SandboxViolation
+from .memory_tools import AGENT_SOURCE, MemoryWrite
 from .registry import RegistryExecutor, Tool, ToolRegistry, fs_executor
 
 __all__ = [
@@ -14,6 +15,8 @@ __all__ = [
     "FsRead",
     "FsWrite",
     "FsDelete",
+    "MemoryWrite",
+    "AGENT_SOURCE",
     "Tool",
     "ToolRegistry",
     "RegistryExecutor",

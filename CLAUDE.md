@@ -49,7 +49,8 @@ order of §12; do not build ahead of it.
   inside an escaped `<untrusted_data>` block; exactly one tool call per step). It
   is tested against a fake transport; `evaluation/llm_headline.py` measures it
   against a live model server. No live-model result is recorded yet.
-- **Executor:** closed filesystem registry, tool/grant equality checks, repeated
+- **Executor:** closed registry (filesystem tools, plus opt-in gated
+  `memory.write` per §7), tool/grant equality checks, repeated
   logical path checks, real-path containment, and rejection of symlink components.
   A logical path outside the grant is denied by the default gate as
   `action.blocked`, without consuming action budget. Filesystem state violations
@@ -365,14 +366,22 @@ relay memory content. These labels do not prevent human persuasion.
 **Agent memory writes:** if the agent wants to persist something, that is a
 *gated action* (`memory.write` must appear in the ScopeGrant and pass the
 gate), not a trusted framework event. Agents earn writes; frameworks don't
-gift them.
+gift them. *Implemented* (`executor/memory_tools.py`): the grant's constraint
+names the one namespace the tool may write (`{"namespace": ...}`, required),
+arguments are exactly `namespace` and `content` (non-empty, at most 4 KiB), and
+the deployment must register the tool (`fs_executor(root, memory=...)`). The
+write is an ordinary `memory.raw.appended` event with actor `tool:memory.write`
+and source `agent:memory.write`; the receipt names its `raw_id`. Later tasks
+retrieve it as data. No policy rule confers it, so under D7 it is denied until
+Sai's policy does.
 
 ---
 
 ## 8. Executor and tools
 
-- Closed tool registry; v1 ships file-ops only (`fs.read`, `fs.write`,
-  `fs.delete`) rooted in a sandbox directory. Constraint enforcement
+- Closed tool registry; v1 ships file-ops (`fs.read`, `fs.write`,
+  `fs.delete`) rooted in a sandbox directory, plus `memory.write` when the
+  deployment registers it (§7). Constraint enforcement
   (path-prefix, etc.) happens *again* at the executor — defense in depth; the
   executor does not trust that the gate was the only path to it.
 - Outcome receipts are appended as events. Read text is omitted; its bounded
@@ -433,7 +442,7 @@ tenet/
   constraints.py   pure logical constraint validators
   agent/           proposal.py (compatibility alias), brain.py (scripted), llm_brain.py (local LLM), loop.py   ◄── BUILT
   approver/        protocol.py, cli.py, scripted.py, failsafe.py   ◄── BUILT
-  executor/        registry.py, fs_tools.py (sandboxed)   ◄── BUILT
+  executor/        registry.py, fs_tools.py (sandboxed), memory_tools.py (memory.write)   ◄── BUILT
   api/             app.py (create_app), demo.py (uvicorn factory)   ◄── BUILT
   projections/     audit.py (readable why-chain view)   ◄── BUILT | steps.py (not needed yet)
   demo/            naive_agent.py, tenet_agent.py, brain.py (GullibleBrain), policy.py (DEMO FIXTURE),

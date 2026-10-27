@@ -81,6 +81,13 @@ folded from that log. Nothing is authoritative except the log.
   Logical `path_prefix` violations are blocked by the gate before dispatch.
   Grant constraints are re-checked at the executor — defense in
   depth; it does not trust that the gate was the only path to it.
+- **Agent memory writes** (`src/tenet/executor/memory_tools.py`) — `memory.write`
+  is the agent's only way to persist memory, and it is a gated action (§7): the
+  grant must name the one namespace it may write, the gate must allow it, and
+  the deployment must register it (`fs_executor(root, memory=memory)`). The
+  write is ordinary memory labelled `agent:memory.write`, linked by its receipt
+  to the proposal and grant that allowed it; later tasks retrieve it as data.
+  No policy rule confers it yet, so the default gate denies it.
 - **Journal + reconciliation** (`src/tenet/journal.py`, `src/tenet/recovery.py`,
   A3) — `journal.append` writes a bounded report and its operation receipt in one
   SQLite transaction, bound to the dispatch's operation ID, proposal digest,

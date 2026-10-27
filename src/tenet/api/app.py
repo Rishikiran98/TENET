@@ -109,7 +109,7 @@ def _summarize(result) -> dict:
         return {}
     return {k: v for k, v in result.items()
             if k in ("path", "bytes_returned", "bytes_written", "deleted",
-                     "content_sha256", "truncated")}
+                     "content_sha256", "truncated", "namespace", "raw_id", "content_hash")}
 
 
 def create_app(
