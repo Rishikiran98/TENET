@@ -1,5 +1,56 @@
 # Review status and validation
 
+## October 27, 2026 status (0.5.0) — current
+
+**Added since 0.4.0:**
+
+- **HTTP approvals and async tasks.** `POST /tasks` runs on a worker thread; an
+  ESCALATE waits for the principal at `POST /tasks/{id}/approvals/{ref}`, bound
+  to the surface shown. A wrong binding is refused; timeout, grant expiry or
+  shutdown deny.
+- **LLMBrain** (`agent/llm_brain.py`): a Brain for any OpenAI-compatible
+  endpoint, Ollama by default, so it runs free on a local model. Memory and
+  observations travel only in an escaped `<untrusted_data>` block; exactly one
+  tool call per step, anything else aborts the task.
+- **Gated `memory.write`** (CLAUDE.md §7): exact arguments, a grant that names
+  one namespace, opt-in registration, executor re-check, agent provenance on
+  the written record. No policy rule confers it yet, so it is denied (D7).
+- **External log anchors** ([A4](correctness-contract-a4.md)): detect suffix
+  truncation and wholesale log replacement, given an anchor kept off-host.
+- **Correctness CI** (`.github/workflows/correctness.yml`): core tests on
+  Python 3.11 and 3.13 fail on any skipped test; the comparisons and the
+  pgvector suite run against a real Postgres.
+- **Review fixes** recorded as regression tests, among them LLMBrain error
+  handling, the live evaluation's out-of-grant count, and task-registry eviction.
+
+**Current validation.** In CI and locally: 489 core tests pass on Python 3.11
+and 3.13 with none skipped, 12 pgvector tests pass against Postgres 16 with
+pgvector, and the comparisons pass 9/9 (shared action cases), 4/4 (process
+crash) and 12/12 (A3 recovery). This is evidence for the tested contracts, not a
+claim of exhaustive correctness or production readiness.
+
+**Current limits.**
+
+- Production gate policy is still pending (D8, Sai's). The demo and tests use
+  labelled fixture policies.
+- No live-model result is recorded. `evaluation/llm_headline.py` runs against a
+  local model; the injection measurements in this repository use deterministic
+  Brains.
+- Pending HTTP approvals and running tasks live in process memory; after a
+  restart such a task reports `interrupted`.
+- An anchor protects only if stored off the log's host; it says nothing about
+  events appended after it.
+- Only `journal.append` dispatches can be reconciled; ordinary filesystem
+  effects with an uncertain outcome stay unresolved.
+- Several running `MemoryCore` instances over one log need explicit refresh to
+  see each other's new memory.
+- Native Windows, production-scale concurrency and hostile-host isolation are
+  not evaluated; host compromise stays out of scope (§1).
+
+## Historical record
+
+The sections below are kept unchanged as the 0.4.0 and 0.3.0 record.
+
 **October 11, 2026 status (0.4.0).** A3 added the transactional journal and
 operator reconciliation, so the reconciliation limit below now applies only to
 ordinary filesystem effects. Later review rounds fixed the issues recorded in

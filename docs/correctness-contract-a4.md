@@ -1,8 +1,9 @@
 # Amendment A4: external log anchors
 
-October 2026. This extends A3 and narrows one limitation that CLAUDE.md §3.1
-and the review follow-up state: a hash chain detects edits to history, but
-not removal of a valid suffix or replacement of the whole log.
+October 27, 2026. Package version 0.5.0. This extends A3 and narrows one
+limitation that CLAUDE.md §3.1 and the review follow-up state: a hash chain
+detects edits to history, but not removal of a valid suffix or replacement of
+the whole log.
 
 ## Decision
 
