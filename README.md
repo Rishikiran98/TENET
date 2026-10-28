@@ -18,11 +18,13 @@ symlink rejection, ingestion retry keys, atomic projection rebuilds, and an
 optional `SQLiteEventLog` for durability. Version 0.3.0 adds proposal-causal audits,
 strict receipts and filesystem arguments, bounded Brain observations, incremental
 SQLite loading, and automatic hydration on reopen. In-memory logs remain process-local.
-The current version, 0.4.0 (A3), adds a transactional `journal.append` tool and
+Version 0.4.0 (A3) added a transactional `journal.append` tool and
 operator reconciliation of uncertain journal dispatches (event schema 3, 16 event
-types); ordinary filesystem effects keep A2's uncertainty.
+types); ordinary filesystem effects keep A2's uncertainty. Version 0.5.0 adds
+HTTP approvals, a local-model `LLMBrain`, gated agent memory writes, and
+[A4 external log anchors](docs/correctness-contract-a4.md).
 
-Current validation and API migration notes are in
+Current status, validation and limits, plus API migration notes, are in
 [review follow-up](docs/review-follow-up.md).
 
 See [measured results and limitations](docs/correctness-results.md) and
@@ -206,7 +208,7 @@ log.verify()                 # True — the hash chain holds
 1. **Event log** ✅
 2. **Memory core on the log** (raw = event, context = projection) ✅
 3. **ScopeGrant + retriever scope enforcement** ✅
-4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring next)
+4. **Governance gate — contract** ✅ (policy is Sai's, describe-first; loop wiring landed with step 5)
 5. **Agent loop + approver/escalate path** ✅
 6. **Executor + sandboxed fs tools** ✅
 7. **Headline demo** — poisoned corpus, naive agent vs. Tenet agent, audit view as
